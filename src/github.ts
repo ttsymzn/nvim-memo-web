@@ -1,7 +1,17 @@
-import type { FileChange, Head, Transport, TreeEntry } from './transport';
+import type { FileChange, Head, PutResult, Transport, TreeEntry } from './transport';
 
 const API = 'https://api.github.com';
 const BLOB_BATCH = 100;
+
+/** Base64 of the UTF-8 bytes, as the Contents API expects. */
+function base64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
 
 export class GitHubError extends Error {
   constructor(
@@ -44,9 +54,12 @@ export class GitHubTransport implements Transport {
   }
 
   async getHead(): Promise<Head> {
-    const ref = await this.rest<{ object: { sha: string } }>('GET', `/git/ref/heads/${this.branch}`);
-    const commit = await this.rest<{ tree: { sha: string } }>('GET', `/git/commits/${ref.object.sha}`);
-    return { commit: ref.object.sha, tree: commit.tree.sha };
+    // One request: the branch endpoint includes the head commit's tree.
+    const branch = await this.rest<{ commit: { sha: string; commit: { tree: { sha: string } } } }>(
+      'GET',
+      `/branches/${this.branch}`,
+    );
+    return { commit: branch.commit.sha, tree: branch.commit.commit.tree.sha };
   }
 
   async listTree(tree: string): Promise<TreeEntry[]> {
@@ -83,8 +96,8 @@ export class GitHubTransport implements Transport {
     return out;
   }
 
-  async createCommit(head: Head, changes: FileChange[], message: string): Promise<Head> {
-    const tree = await this.rest<{ sha: string }>('POST', '/git/trees', {
+  async createCommit(head: Head, changes: FileChange[], message: string) {
+    const tree = await this.rest<{ sha: string; tree: { path: string; sha: string; type: string }[] }>('POST', '/git/trees', {
       base_tree: head.tree,
       tree: changes.map((c) =>
         c.content === null
@@ -97,7 +110,26 @@ export class GitHubTransport implements Transport {
       tree: tree.sha,
       parents: [head.commit],
     });
-    return { commit: commit.sha, tree: tree.sha };
+    const entries = tree.tree.filter((e) => e.type === 'blob').map(({ path, sha }) => ({ path, sha }));
+    return { head: { commit: commit.sha, tree: tree.sha }, entries };
+  }
+
+  async putFile(path: string, content: string, message: string, sha: string): Promise<PutResult | null> {
+    try {
+      const res = await this.rest<{
+        content: { sha: string };
+        commit: { sha: string; tree: { sha: string }; parents: { sha: string }[] };
+      }>('PUT', `/contents/${encodeURIComponent(path)}`, { message, content: base64(content), sha, branch: this.branch });
+      return {
+        head: { commit: res.commit.sha, tree: res.commit.tree.sha },
+        parent: res.commit.parents[0]?.sha ?? '',
+        blobSha: res.content.sha,
+      };
+    } catch (e) {
+      // 409: the file's sha no longer matches; 422: e.g. the file was deleted.
+      if (e instanceof GitHubError && (e.status === 409 || e.status === 422)) return null;
+      throw e;
+    }
   }
 
   async updateRef(commit: string): Promise<boolean> {

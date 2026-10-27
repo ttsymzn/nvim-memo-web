@@ -15,6 +15,7 @@ npm run build
 `?mock` を付けると GitHub に接続せず、メモリ上のリポジトリで動く。devtools から
 `__mock.externalWrite('example.md', 'text')` でターミナル側からの push を再現できる。
 クリップボードもメモリ上の偽物になり、`__clipboard.text = '…'` で他アプリでのコピーを再現できる。
+`?mock&latency=300` で GitHub への1リクエストごとに 300ms の遅延を入れられる（保存速度の確認用）。
 
 ## 接続
 
@@ -49,6 +50,8 @@ npm run build
 入力中は `↑`/`↓`（`Ctrl+P`/`Ctrl+N`）で選択、`Enter` で一致箇所にカーソルを置いて開く、`Esc` で解除。
 
 保存は「後勝ち」。リモートが先に進んでいたら、その上に自分の内容を載せ直して push する。
+既存メモの編集は Contents API で1リクエスト、新規メモ（`.index` 更新込み）は Git Data API で3リクエスト。
+手元のスナップショットが古くて失敗したときだけ、ブランチを取り直して再試行する。
 
 ## 構成
 

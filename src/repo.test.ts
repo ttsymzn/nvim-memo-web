@@ -52,42 +52,76 @@ describe('nb helpers', () => {
   });
 });
 
+/**
+ * A repo whose transport records which methods MemoRepo calls, in order
+ * (each is one or more HTTP requests). Calls the mock makes internally, or
+ * that tests make on `t` directly, are not counted.
+ */
+async function loaded(files: Record<string, string> = seed) {
+  const t = new MockTransport(files);
+  const calls: string[] = [];
+  const counted = new Proxy(t, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop);
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        calls.push(String(prop));
+        return value.apply(target, args);
+      };
+    },
+  });
+  const repo = new MemoRepo(counted, memoryStore());
+  await repo.refresh();
+  calls.length = 0;
+  return { t, repo, calls };
+}
+
 describe('MemoRepo', () => {
-  it('loads files and edits with an nb-style commit', async () => {
-    const t = new MockTransport(seed);
-    const repo = new MemoRepo(t, memoryStore());
-    await repo.refresh();
+  it('edits an existing memo with a single Contents API request', async () => {
+    const { t, repo, calls } = await loaded();
     expect(repo.get('example.md')?.text).toBe('hello\n');
 
     expect(await repo.save('example.md', 'hello!\n')).toBe('edited');
+    expect(calls).toEqual(['putFile']);
     expect(t.log).toEqual(['[nb] Edit: example.md']);
     expect(await t.readFile('example.md')).toBe('hello!\n');
     expect(await t.readFile('.index')).toBe(seed['.index']);
+    expect(repo.head?.commit).toBe(t.ref);
+    expect(repo.get('example.md')?.text).toBe('hello!\n');
   });
 
-  it('adds a new file and appends it to .index in the same commit', async () => {
-    const t = new MockTransport(seed);
-    const repo = new MemoRepo(t, memoryStore());
-    await repo.refresh();
+  it('adds a new memo and its .index line in one commit, with three requests', async () => {
+    const { t, repo, calls } = await loaded();
     expect(await repo.save('20261027100000.md', 'new\n')).toBe('added');
+    // POST tree + POST commit (createCommit) and PATCH ref (updateRef).
+    expect(calls).toEqual(['createCommit', 'updateRef']);
     expect(t.log).toEqual(['[nb] Add: 20261027100000.md']);
     expect(await t.readFile('.index')).toBe(seed['.index'] + '20261027100000.md\n');
     expect(repo.get('20261027100000.md')?.text).toBe('new\n');
+    expect(repo.head?.commit).toBe(t.ref);
   });
 
-  it('skips the commit when nothing changed', async () => {
-    const t = new MockTransport(seed);
-    const repo = new MemoRepo(t, memoryStore());
-    await repo.refresh();
+  it('skips the commit when nothing changed, without any request', async () => {
+    const { t, repo, calls } = await loaded();
     expect(await repo.save('example.md', 'hello\n')).toBe('unchanged');
+    expect(calls).toEqual([]);
     expect(t.log).toEqual([]);
   });
 
-  it('last write wins and keeps files pushed by others', async () => {
-    const t = new MockTransport(seed);
-    const repo = new MemoRepo(t, memoryStore());
-    await repo.refresh();
-    // Another machine edits the same file and adds a note after we loaded.
+  it('edits in one request even if others pushed other files, and picks those up', async () => {
+    const { t, repo, calls } = await loaded();
+    await t.externalWrite('other.md', 'x\n', '[nb] Add: other.md');
+
+    expect(await repo.save('example.md', 'from web\n')).toBe('edited');
+    expect(calls.slice(0, 1)).toEqual(['putFile']);
+    expect(calls).not.toContain('createCommit');
+    expect(await t.readFile('example.md')).toBe('from web\n');
+    expect(repo.get('other.md')?.text).toBe('x\n');
+    expect(repo.head?.commit).toBe(t.ref);
+  });
+
+  it('last write wins when the same memo changed remotely', async () => {
+    const { t, repo } = await loaded();
     await t.externalWrite('example.md', 'from terminal\n');
     await t.externalWrite('other.md', 'x\n', '[nb] Add: other.md');
 
@@ -97,10 +131,20 @@ describe('MemoRepo', () => {
     expect(repo.get('other.md')?.text).toBe('x\n');
   });
 
+  it('a new memo on a stale snapshot falls back to fetching and keeps others’ work', async () => {
+    const { t, repo, calls } = await loaded();
+    await t.externalWrite('race.md', 'r\n', '[nb] Add: race.md');
+
+    expect(await repo.save('20261027100000.md', 'new\n')).toBe('added');
+    expect(calls).toEqual(['createCommit', 'updateRef', 'getHead', 'listTree', 'createCommit', 'updateRef', 'getBlobs']);
+    expect(t.log).toEqual(['[nb] Add: race.md', '[nb] Add: 20261027100000.md']);
+    expect(await t.readFile('race.md')).toBe('r\n');
+    expect(await t.readFile('.index')).toBe(seed['.index'] + '20261027100000.md\n');
+    expect(repo.get('race.md')?.text).toBe('r\n');
+  });
+
   it('retries when the branch moves between commit and push', async () => {
-    const t = new MockTransport(seed);
-    const repo = new MemoRepo(t, memoryStore());
-    await repo.refresh();
+    const { t, repo } = await loaded();
     const create = t.createCommit.bind(t);
     let raced = false;
     t.createCommit = async (head: Head, changes, message) => {
@@ -111,9 +155,16 @@ describe('MemoRepo', () => {
       }
       return c;
     };
-    expect(await repo.save('example.md', 'mine\n')).toBe('edited');
-    expect(t.log).toEqual(['[nb] Add: race.md', '[nb] Edit: example.md']);
+    expect(await repo.save('20261027100000.md', 'mine\n')).toBe('added');
+    expect(t.log).toEqual(['[nb] Add: race.md', '[nb] Add: 20261027100000.md']);
     expect(await t.readFile('race.md')).toBe('r\n');
+  });
+
+  it('a memo deleted remotely is saved again as a new one', async () => {
+    const { t, repo } = await loaded();
+    await t.externalWrite('example.md', null, '[nb] Delete: example.md');
+    expect(await repo.save('example.md', 'still here\n')).toBe('added');
+    expect(await t.readFile('example.md')).toBe('still here\n');
   });
 
   it('restores the snapshot from storage', async () => {

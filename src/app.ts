@@ -310,15 +310,17 @@ export class App {
       const text = this.text(buf);
       const fileText = toFileText(text);
       this.setSync('saving');
+      const started = performance.now();
       try {
         const result = await this.repo.save(path, fileText);
+        const seconds = ((performance.now() - started) / 1000).toFixed(1);
         buf.saved = text;
         buf.isNew = false;
         this.setSync('idle');
         const lines = fileText === '' ? 0 : fileText.split('\n').length - 1;
         const size = new TextEncoder().encode(fileText).length;
         const tag = result === 'added' ? ' [New]' : result === 'unchanged' ? ' (変更なし)' : '';
-        this.message(`"${path}"${tag} ${lines}L, ${size}B written`);
+        this.message(`"${path}"${tag} ${lines}L, ${size}B written (${seconds}s)`);
         this.render();
         return true;
       } catch (e) {

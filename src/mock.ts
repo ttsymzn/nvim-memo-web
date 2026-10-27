@@ -1,4 +1,4 @@
-import type { FileChange, Head, Transport, TreeEntry } from './transport';
+import type { FileChange, Head, PutResult, Transport, TreeEntry } from './transport';
 
 interface MockCommit {
   tree: string;
@@ -53,14 +53,25 @@ export class MockTransport implements Transport {
     return new Map(shas.map((s) => [s, this.blobs.get(s) ?? null] as const));
   }
 
-  async createCommit(head: Head, changes: FileChange[], message: string): Promise<Head> {
-    const entries = new Map(this.trees.get(head.tree)!.map((e) => [e.path, e.sha]));
+  async createCommit(head: Head, changes: FileChange[], message: string) {
+    const map = new Map(this.trees.get(head.tree)!.map((e) => [e.path, e.sha]));
     for (const c of changes) {
-      if (c.content === null) entries.delete(c.path);
-      else entries.set(c.path, this.writeBlob(c.content));
+      if (c.content === null) map.delete(c.path);
+      else map.set(c.path, this.writeBlob(c.content));
     }
-    const tree = this.writeTree([...entries].map(([path, sha]) => ({ path, sha })));
-    return { commit: this.writeCommit(tree, head.commit, message), tree };
+    const entries = [...map].map(([path, sha]) => ({ path, sha }));
+    const tree = this.writeTree(entries);
+    return { head: { commit: this.writeCommit(tree, head.commit, message), tree }, entries: [...entries] };
+  }
+
+  async putFile(path: string, content: string, message: string, sha: string): Promise<PutResult | null> {
+    const current = await this.getHead();
+    // Like the Contents API: refuse when the file is not at the blob the caller saw.
+    if (this.trees.get(current.tree)!.find((e) => e.path === path)?.sha !== sha) return null;
+    const next = await this.createCommit(current, [{ path, content }], message);
+    await this.updateRef(next.head.commit);
+    const blobSha = next.entries.find((e) => e.path === path)!.sha;
+    return { head: next.head, parent: current.commit, blobSha };
   }
 
   async updateRef(commit: string): Promise<boolean> {
@@ -74,7 +85,7 @@ export class MockTransport implements Transport {
   /** Simulate a push from another machine (e.g. `nb sync` in a terminal). */
   async externalWrite(path: string, content: string | null, message = `[nb] Edit: ${path}`) {
     const next = await this.createCommit(await this.getHead(), [{ path, content }], message);
-    await this.updateRef(next.commit);
+    await this.updateRef(next.head.commit);
   }
 
   async readFile(path: string): Promise<string | undefined> {

@@ -75,8 +75,12 @@ async function logout() {
 }
 
 async function main() {
-  if (new URLSearchParams(location.search).has('mock')) {
+  const params = new URLSearchParams(location.search);
+  if (params.has('mock')) {
     const transport = new MockTransport(MOCK_FILES);
+    // ?mock&latency=300 delays each simulated GitHub request by 300ms.
+    const latency = Number(params.get('latency') ?? 0);
+    const requests: Record<string, number> = { createCommit: 2 }; // POST tree + POST commit
     // Exposed for poking at the fake remote from devtools, e.g. __mock.externalWrite('x.md', 'hi')
     (window as unknown as { __mock: MockTransport }).__mock = transport;
     // An in-memory clipboard, so y/p can be exercised without permission prompts.
@@ -97,7 +101,17 @@ async function main() {
       get: async <T>(k: string) => memory.get(k) as T | undefined,
       set: async (k, v) => void memory.set(k, v),
     };
-    start(transport, store, () => location.reload());
+    const slow = new Proxy(transport, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (!latency || typeof value !== 'function') return value;
+        return async (...args: unknown[]) => {
+          await new Promise((r) => setTimeout(r, latency * (requests[String(prop)] ?? 1)));
+          return value.apply(target, args);
+        };
+      },
+    });
+    start(slow, store, () => location.reload());
     return;
   }
   const settings = await get<Settings>(SETTINGS_KEY);

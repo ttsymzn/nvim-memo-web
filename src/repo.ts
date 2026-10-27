@@ -110,39 +110,75 @@ export class MemoRepo {
 
   /**
    * Commit `text` as `path` on top of the current remote `main`.
-   * Last write wins: if someone pushed in between, rebuild on their commit
-   * and push our content again.
+   *
+   * Starts from the local snapshot so a save usually takes one request (edit,
+   * via the Contents API) or three (new memo, which also updates `.index`).
+   * If the remote moved in a way that matters, falls back to fetching the
+   * branch and retrying. Last write wins: our content is pushed on top of
+   * whatever others committed.
    */
   async save(path: string, text: string): Promise<SaveResult> {
+    if (this.head) {
+      const existing = this.entries.find((e) => e.path === path);
+      if (existing) {
+        if ((await this.blobText(existing.sha)) === text) return 'unchanged';
+        const put = await this.transport.putFile(path, text, `[nb] Edit: ${path}`, existing.sha);
+        if (put) {
+          await this.adoptPut(path, text, put.head, put.parent, put.blobSha);
+          return 'edited';
+        }
+      } else {
+        const result = await this.commitOn(this.head, this.entries, path, text);
+        if (result) return result;
+      }
+    }
+
     for (let attempt = 0; attempt < MAX_PUSH_ATTEMPTS; attempt++) {
       const head = await this.transport.getHead();
       const entries = await this.transport.listTree(head.tree);
       const existing = entries.find((e) => e.path === path);
-
       if (existing && (await this.blobText(existing.sha)) === text) {
         await this.adopt(head, entries);
         return 'unchanged';
       }
-
-      const changes: FileChange[] = [{ path, content: text }];
-      if (!existing) {
-        const index = entries.find((e) => e.path === INDEX_FILE);
-        const indexText = index ? ((await this.blobText(index.sha)) ?? '') : '';
-        changes.push({ path: INDEX_FILE, content: appendToIndex(indexText, path) });
-      }
-      const message = `[nb] ${existing ? 'Edit' : 'Add'}: ${path}`;
-
-      const next = await this.transport.createCommit(head, changes, message);
-      if (!(await this.transport.updateRef(next.commit))) continue;
-
-      const nextEntries = await this.transport.listTree(next.tree);
-      for (const c of changes) {
-        const sha = nextEntries.find((e) => e.path === c.path)?.sha;
-        if (sha) this.blobs.set(sha, c.content);
-      }
-      await this.adopt(next, nextEntries);
-      return existing ? 'edited' : 'added';
+      const result = await this.commitOn(head, entries, path, text);
+      if (result) return result;
     }
     throw new Error(`push failed ${MAX_PUSH_ATTEMPTS} times: the branch keeps moving`);
+  }
+
+  /**
+   * Commit on top of `head` (whose tree is `entries`) and fast-forward the
+   * branch. Returns null when the branch is no longer at `head`.
+   */
+  private async commitOn(head: Head, entries: TreeEntry[], path: string, text: string): Promise<SaveResult | null> {
+    const existing = entries.find((e) => e.path === path);
+    const changes: FileChange[] = [{ path, content: text }];
+    if (!existing) {
+      const index = entries.find((e) => e.path === INDEX_FILE);
+      const indexText = index ? ((await this.blobText(index.sha)) ?? '') : '';
+      changes.push({ path: INDEX_FILE, content: appendToIndex(indexText, path) });
+    }
+    const message = `[nb] ${existing ? 'Edit' : 'Add'}: ${path}`;
+
+    const next = await this.transport.createCommit(head, changes, message);
+    if (!(await this.transport.updateRef(next.head.commit))) return null;
+
+    for (const c of changes) {
+      const sha = next.entries.find((e) => e.path === c.path)?.sha;
+      if (sha) this.blobs.set(sha, c.content);
+    }
+    await this.adopt(next.head, next.entries);
+    return existing ? 'edited' : 'added';
+  }
+
+  /** Record a Contents API write. If others pushed first, list the new tree to pick up their changes too. */
+  private async adoptPut(path: string, text: string, head: Head, parent: string, blobSha: string) {
+    this.blobs.set(blobSha, text);
+    const entries =
+      parent === this.head?.commit
+        ? this.entries.map((e) => (e.path === path ? { path, sha: blobSha } : e))
+        : await this.transport.listTree(head.tree);
+    await this.adopt(head, entries);
   }
 }
