@@ -1,6 +1,6 @@
 import { history, historyKeymap, defaultKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorState, type Extension } from '@codemirror/state';
+import { EditorState, Prec, type Extension } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -132,7 +132,9 @@ export function editorExtensions(onUpdate: (u: ViewUpdate) => void): Extension[]
     highlightActiveLineGutter(),
     drawSelection(),
     history(),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    // Lowest, so Vim always gets keys first; these only act in insert mode
+    // (e.g. Enter inserting a newline) once Vim lets a key through.
+    Prec.lowest(keymap.of([...defaultKeymap, ...historyKeymap])),
     markdown(),
     tagHighlight,
     EditorView.lineWrapping,

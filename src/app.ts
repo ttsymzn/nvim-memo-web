@@ -1,5 +1,5 @@
 import { EditorState, Prec, type Extension } from '@codemirror/state';
-import { EditorView, keymap, type ViewUpdate } from '@codemirror/view';
+import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { Vim, getCM } from '@replit/codemirror-vim';
 import { syncYanksToClipboard } from './clipboard';
 import { createState, editorExtensions } from './editor';
@@ -87,12 +87,20 @@ export class App {
   ) {
     app = this;
     this.extensions = [
+      // Not keymap.of: all keymaps share one handler, so a high-precedence
+      // keymap would run the default Enter binding before Vim sees the key.
       Prec.highest(
-        keymap.of([
-          { key: 'Mod-s', run: () => (this.write(), true), preventDefault: true },
-        ]),
+        EditorView.domEventHandlers({
+          keydown: (e, view) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+              e.preventDefault();
+              void this.write();
+              return true;
+            }
+            return this.onLeaderKey(e, view);
+          },
+        }),
       ),
-      Prec.highest(EditorView.domEventHandlers({ keydown: (e, view) => this.onLeaderKey(e, view) })),
       ...editorExtensions((u) => this.onEditorUpdate(u)),
     ];
     this.view = new EditorView({ parent: this.dom.editor, state: createState('', this.extensions) });
