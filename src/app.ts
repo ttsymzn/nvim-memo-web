@@ -604,6 +604,24 @@ const EX_ALIASES: Record<string, string> = {
   bnext: 'bn', bprevious: 'bp', bdelete: 'bd', buffers: 'ls',
 };
 
+/**
+ * With a Japanese IME on, normal-mode keys arrive as the text the IME
+ * commits: full-width ASCII (／, ｎ, ：) or Japanese punctuation (・ for /,
+ * ー for -). Map them back to the keys Vim expects, via Vim's 'langmap'.
+ */
+function imeLangmap(): string {
+  const escape = (ch: string) => (',;\\'.includes(ch) ? `\\${ch}` : ch);
+  const pairs: string[] = [];
+  for (let code = 0x21; code <= 0x7e; code++) {
+    pairs.push(String.fromCharCode(code + 0xfee0) + escape(String.fromCharCode(code)));
+  }
+  const punctuation: [string, string][] = [
+    ['・', '/'], ['ー', '-'], ['「', '['], ['」', ']'], ['、', ','], ['。', '.'], ['￥', '\\'], ['　', ' '],
+  ];
+  for (const [from, to] of punctuation) pairs.push(from + escape(to));
+  return pairs.join('');
+}
+
 let vimConfigured = false;
 
 export function configureVim() {
@@ -635,6 +653,7 @@ export function configureVim() {
   // LazyVim-style keymaps (leader = Space).
   // codemirror-vim waits only 200ms for the second `j`; use Neovim's default timeoutlen.
   Vim.setOption('insertModeEscKeysTimeout', 1000);
+  Vim.setOption('langmap', imeLangmap());
   // Note: never Vim.unmap a built-in key. noremap expansion locates the
   // built-in keymap by its original length, so removing one makes noremap
   // see a user mapping (p -> "+p then re-expanded and dropped).
