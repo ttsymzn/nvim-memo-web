@@ -564,6 +564,9 @@ export function configureVim() {
   // LazyVim-style keymaps (leader = Space).
   // codemirror-vim waits only 200ms for the second `j`; use Neovim's default timeoutlen.
   Vim.setOption('insertModeEscKeysTimeout', 1000);
+  // codemirror-vim binds <Space> to `l`; a full match beats the partial
+  // <Space>xx leader maps, so drop it as LazyVim does.
+  Vim.unmap('<Space>', undefined);
   Vim.map('jj', '<Esc>', 'insert');
   Vim.map('H', ':bprevious<CR>', 'normal');
   Vim.map('L', ':bnext<CR>', 'normal');

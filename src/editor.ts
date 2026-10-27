@@ -72,12 +72,22 @@ function imeEscape(): Extension {
   let escAfterComposition = false;
   let jjSuffix: string | null = null;
   const inInsert = (view: EditorView) => !!getCM(view)?.state.vim?.insertMode;
+  const toNormal = (view: EditorView) => {
+    const cm = getCM(view);
+    if (cm?.state.vim?.insertMode) Vim.handleKey(cm, '<Esc>', 'user');
+  };
 
   return EditorView.domEventHandlers({
     keydown(e, view) {
-      // The IME consumes this Esc to cancel the composition; follow up once it has.
-      if (inInsert(view) && e.code === 'Escape' && (e.isComposing || e.key === 'Process' || e.keyCode === 229)) {
+      if (!inInsert(view) || e.code !== 'Escape') return false;
+      if (e.isComposing || view.composing) {
+        // The IME consumes this Esc to cancel the composition; follow up once it has.
         escAfterComposition = true;
+      } else if (e.key === 'Process' || e.keyCode === 229) {
+        // IME on but nothing being composed: Vim ignores "Process", so leave insert mode here.
+        e.preventDefault();
+        toNormal(view);
+        return true;
       }
       return false;
     },
@@ -104,8 +114,7 @@ function imeEscape(): Extension {
             view.dispatch({ changes: { from: head - suffix.length, to: head } });
           }
         }
-        const cm = getCM(view);
-        if (cm?.state.vim?.insertMode) Vim.handleKey(cm, '<Esc>', 'user');
+        toNormal(view);
       }, 0);
       return false;
     },
