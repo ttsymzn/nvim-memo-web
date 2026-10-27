@@ -15,7 +15,7 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
-import { vim } from '@replit/codemirror-vim';
+import { Vim, getCM, vim } from '@replit/codemirror-vim';
 import { tokyonight } from './theme';
 
 class LineNumber extends GutterMarker {
@@ -60,9 +60,62 @@ const tagHighlight = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 );
 
+/** Matches `jj` typed while a Japanese IME is on: ｊｊ, っｊ, ッｊ (or their ASCII forms). */
+const JJ_IN_IME = /(?:[jｊ][jｊ]|[っッ][jｊ])$/;
+
+/**
+ * Leave insert mode while a Japanese IME is active. With the IME on, keydown
+ * reports `key: "Process"`, which codemirror-vim ignores, so neither Esc nor
+ * the `jj` mapping would reach Vim.
+ */
+function imeEscape(): Extension {
+  let escAfterComposition = false;
+  let jjSuffix: string | null = null;
+  const inInsert = (view: EditorView) => !!getCM(view)?.state.vim?.insertMode;
+
+  return EditorView.domEventHandlers({
+    keydown(e, view) {
+      // The IME consumes this Esc to cancel the composition; follow up once it has.
+      if (inInsert(view) && e.code === 'Escape' && (e.isComposing || e.key === 'Process' || e.keyCode === 229)) {
+        escAfterComposition = true;
+      }
+      return false;
+    },
+    compositionupdate(e, view) {
+      const m = inInsert(view) ? JJ_IN_IME.exec(e.data) : null;
+      if (m) {
+        jjSuffix = m[0];
+        // Blurring commits the composition, which fires compositionend.
+        view.contentDOM.blur();
+        setTimeout(() => view.focus(), 0);
+      }
+      return false;
+    },
+    compositionend(_e, view) {
+      if (!escAfterComposition && jjSuffix === null) return false;
+      const suffix = jjSuffix;
+      escAfterComposition = false;
+      jjSuffix = null;
+      // Let CodeMirror apply the committed text first.
+      setTimeout(() => {
+        if (suffix) {
+          const head = view.state.selection.main.head;
+          if (view.state.sliceDoc(head - suffix.length, head) === suffix) {
+            view.dispatch({ changes: { from: head - suffix.length, to: head } });
+          }
+        }
+        const cm = getCM(view);
+        if (cm?.state.vim?.insertMode) Vim.handleKey(cm, '<Esc>', 'user');
+      }, 0);
+      return false;
+    },
+  });
+}
+
 export function editorExtensions(onUpdate: (u: ViewUpdate) => void): Extension[] {
   return [
     vim({ status: false }),
+    imeEscape(),
     relativeLineNumbers,
     highlightActiveLine(),
     highlightActiveLineGutter(),
