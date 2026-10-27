@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#16161e" />
+    <title>nvim-memo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <form id="login" hidden autocomplete="off">
+      <pre class="logo">nvim-memo</pre>
+      <p class="login-lead">GitHub の Fine-grained Personal Access Token で接続します。</p>
+      <label>
+        Token
+        <input name="token" type="password" placeholder="github_pat_…" required />
+      </label>
+      <label>
+        Repository
+        <input name="repo" value="ttsymzn/nvim-memo" required />
+      </label>
+      <label>
+        Branch
+        <input name="branch" value="main" />
+      </label>
+      <button type="submit">接続</button>
+      <p id="login-error" role="alert"></p>
+      <details>
+        <summary>token の作り方</summary>
+        <ol>
+          <li>GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token</li>
+          <li>Repository access: <b>Only select repositories</b> で <code>nvim-memo</code> だけを選ぶ</li>
+          <li>Permissions → Repository permissions → <b>Contents: Read and write</b></li>
+        </ol>
+        <p>token はこのブラウザ内（IndexedDB）にだけ保存されます。<code>:Logout</code> で削除できます。</p>
+      </details>
+    </form>
+
+    <div id="app" hidden>
+      <nav id="bufferline"></nav>
+      <main id="main">
+        <section id="dashboard"></section>
+        <section id="editor" hidden></section>
+      </main>
+      <footer id="statusline"></footer>
+      <div id="cmdline" aria-live="polite"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

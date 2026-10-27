@@ -1,0 +1,348 @@
+:root {
+  --bg: #1a1b26;
+  --bg-dark: #16161e;
+  --bg-hl: #292e42;
+  --bg-sl: #1f2335;
+  --fg: #c0caf5;
+  --fg-dark: #a9b1d6;
+  --comment: #565f89;
+  --gutter: #3b4261;
+  --blue: #7aa2f7;
+  --cyan: #7dcfff;
+  --magenta: #bb9af7;
+  --orange: #ff9e64;
+  --yellow: #e0af68;
+  --green: #9ece6a;
+  --teal: #1abc9c;
+  --red: #f7768e;
+  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, 'BIZ UDGothic', monospace;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- layout */
+
+#app {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  height: 100dvh;
+}
+
+#main {
+  min-height: 0;
+  position: relative;
+}
+
+#editor,
+#dashboard {
+  height: 100%;
+}
+
+#editor .cm-editor {
+  height: 100%;
+}
+
+#editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* ------------------------------------------------------------ bufferline */
+
+#bufferline {
+  display: flex;
+  min-height: 26px;
+  background: var(--bg-dark);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.buf {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 14px;
+  color: var(--comment);
+  white-space: nowrap;
+  border-right: 1px solid var(--bg);
+}
+
+.buf.active {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: inset 0 -2px var(--blue);
+}
+
+.buf .mod {
+  color: var(--green);
+  min-width: 1ch;
+}
+
+/* ------------------------------------------------------------ statusline */
+
+#statusline {
+  display: flex;
+  justify-content: space-between;
+  background: var(--bg-sl);
+  color: var(--fg-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  line-height: 22px;
+}
+
+.sl-left,
+.sl-right {
+  display: flex;
+  min-width: 0;
+}
+
+.sl-left > span,
+.sl-right > span {
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sl-mode,
+.sl-pos {
+  font-weight: bold;
+  color: var(--bg-dark);
+  background: var(--blue);
+}
+
+.m-insert {
+  background: var(--green);
+}
+.m-visual {
+  background: var(--magenta);
+}
+.m-replace {
+  background: var(--red);
+}
+.m-dashboard {
+  background: var(--yellow);
+}
+
+.sl-branch {
+  color: var(--magenta);
+  background: var(--bg-hl);
+}
+
+.sl-file {
+  color: var(--fg);
+}
+
+.s-error,
+.s-offline {
+  color: var(--red);
+}
+.s-syncing,
+.s-saving {
+  color: var(--yellow);
+}
+.s-idle {
+  color: var(--green);
+}
+
+.sl-ft,
+.sl-pct {
+  color: var(--comment);
+}
+
+/* --------------------------------------------------------------- cmdline */
+
+#cmdline {
+  min-height: 22px;
+  padding: 0 8px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  background: var(--bg);
+  display: flex;
+}
+
+#cmdline[data-level='error'] {
+  color: var(--red);
+}
+#cmdline[data-level='warn'] {
+  color: var(--yellow);
+}
+
+#cmdline .prompt {
+  flex: 1;
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: none;
+  outline: none;
+}
+
+/* ------------------------------------------------------------- dashboard */
+
+#dashboard {
+  overflow-y: auto;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.logo {
+  margin: 0;
+  color: var(--blue);
+  font-size: clamp(7px, 2.6vw, 14px);
+  line-height: 1.15;
+}
+
+.dash-sub {
+  color: var(--comment);
+  letter-spacing: 0.6em;
+  margin: 6px 0 20px;
+}
+
+.dash-actions,
+.dash-list {
+  width: min(640px, 100%);
+}
+
+.dash-action,
+.dash-item {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  padding: 4px 8px;
+  text-align: left;
+  border-radius: 4px;
+}
+
+.dash-action:hover,
+.dash-item:hover {
+  background: var(--bg-hl);
+}
+
+.dash-icon {
+  color: var(--blue);
+}
+.dash-label {
+  flex: 1;
+}
+.dash-key {
+  color: var(--orange);
+}
+
+.dash-heading {
+  margin: 20px 0 6px;
+  padding: 0 8px;
+  color: var(--magenta);
+}
+
+.dash-item.selected {
+  background: var(--bg-hl);
+  box-shadow: inset 2px 0 var(--blue);
+}
+
+.dash-date {
+  color: var(--cyan);
+  flex: none;
+  min-width: 16ch;
+}
+
+.dash-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-empty,
+.dash-footer {
+  color: var(--comment);
+  padding: 8px;
+}
+
+.dash-footer {
+  margin-top: 20px;
+}
+
+/* ----------------------------------------------------------------- login */
+
+#login {
+  max-width: 440px;
+  margin: 10vh auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#login .logo {
+  font-size: 28px;
+  font-weight: bold;
+}
+
+#login label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-dark);
+}
+
+#login input {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-dark);
+  border: 1px solid var(--gutter);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+#login input:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+#login button {
+  background: var(--blue);
+  color: var(--bg-dark);
+  font-weight: bold;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.login-lead,
+#login details {
+  color: var(--fg-dark);
+  line-height: 1.6;
+}
+
+#login-error {
+  color: var(--red);
+  min-height: 1.4em;
+  margin: 0;
+}
+
+#login code {
+  color: var(--green);
+}

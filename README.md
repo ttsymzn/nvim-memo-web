@@ -1,0 +1,58 @@
+# nvim-memo-web
+
+`nb` で管理しているメモリポジトリ（`ttsymzn/nvim-memo`）を、ブラウザから Neovim（LazyVim）風に編集する Web アプリ。
+サーバーなしの静的サイトで、GitHub API を直接使って読み書きする。
+
+## 開発
+
+```bash
+npm install
+npm run dev      # http://localhost:5173/?mock でモックリポジトリを使って動かせる
+npm test
+npm run build
+```
+
+`?mock` を付けると GitHub に接続せず、メモリ上のリポジトリで動く。devtools から
+`__mock.externalWrite('example.md', 'text')` でターミナル側からの push を再現できる。
+
+## 接続
+
+1. GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token
+2. Repository access: Only select repositories → `nvim-memo`
+3. Permissions → Repository permissions → Contents: **Read and write**
+4. アプリのログイン画面に token を貼る（ブラウザの IndexedDB にだけ保存。`:Logout` で削除）
+
+## デプロイ
+
+`main` に push すると GitHub Actions で GitHub Pages に公開される。
+初回だけ、リポジトリの Settings → Pages → Source を **GitHub Actions** にする。
+
+## 操作（M1 時点）
+
+| キー / コマンド | 動作 |
+|---|---|
+| `:w` / `<C-s>` | 保存（`[nb] Edit:` / `[nb] Add:` で 1 コミット。新規なら `.index` にも追記） |
+| `:q` `:q!` `:wq` `:x` `:qa` `:wa` | 閉じる・保存 |
+| `:e <name>` | 開く / 新規（拡張子省略時は `.md`）。引数なしで再読み込み、`:e!` で変更を破棄 |
+| `:new` / `<Space>fn` | タイムスタンプ名の新規メモ |
+| `:bn` `:bp` `:bd` `:ls` / `H` `L` `<Space>bd` | バッファ操作 |
+| `jj` | insert → normal |
+| `<Space><Space>` / `<Space>ff` / `:Dashboard` | メモ一覧（M2 で fuzzy picker に置き換え予定） |
+| `:Sync` | リモートを取り込み |
+| `:Logout` | token を削除 |
+
+ダッシュボード: `j`/`k` 移動、`Enter` 開く、`n` 新規、`r` 同期、`:` コマンド、`q` 戻る。
+
+保存は「後勝ち」。リモートが先に進んでいたら、その上に自分の内容を載せ直して push する。
+
+## 構成
+
+| ファイル | 役割 |
+|---|---|
+| `src/transport.ts` | git 操作のインターフェース |
+| `src/github.ts` | GitHub REST（Git Data API）+ GraphQL（blob 一括取得） |
+| `src/mock.ts` | メモリ上のリポジトリ（`?mock` とテスト用） |
+| `src/repo.ts` | スナップショットのキャッシュ、保存とリトライ |
+| `src/nb.ts` | nb の流儀（ファイル名、`.index`） |
+| `src/app.ts` | バッファ、Ex コマンド、ダッシュボード、ステータスライン |
+| `src/editor.ts` `src/theme.ts` | CodeMirror + vim、tokyonight |
