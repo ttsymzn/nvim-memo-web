@@ -16,6 +16,7 @@ import {
   type ViewUpdate,
 } from '@codemirror/view';
 import { Vim, getCM, vim } from '@replit/codemirror-vim';
+import { pasteFromClipboard } from './clipboard';
 import { tokyonight } from './theme';
 
 class LineNumber extends GutterMarker {
@@ -125,6 +126,7 @@ export function editorExtensions(onUpdate: (u: ViewUpdate) => void): Extension[]
   return [
     vim({ status: false }),
     imeEscape(),
+    pasteFromClipboard(),
     relativeLineNumbers,
     highlightActiveLine(),
     highlightActiveLineGutter(),

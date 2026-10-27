@@ -1,6 +1,7 @@
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, keymap, type ViewUpdate } from '@codemirror/view';
 import { Vim, getCM } from '@replit/codemirror-vim';
+import { syncYanksToClipboard } from './clipboard';
 import { createState, editorExtensions } from './editor';
 import { isMemoPath, memoTitle, newMemoName, normalizeMemoName } from './nb';
 import type { MemoRepo } from './repo';
@@ -17,6 +18,18 @@ interface Buffer {
 
 type SyncStatus = 'idle' | 'syncing' | 'saving' | 'error' | 'offline';
 type Level = 'info' | 'error' | 'warn';
+
+const LEADER_TIMEOUT_MS = 1000;
+
+/** LazyVim-style <leader> keys (leader = Space) -> [ex command, argument]. */
+const LEADER_MAPS: Record<string, [string, string?]> = {
+  fn: ['new'],
+  bd: ['bd'],
+  qq: ['qa'],
+  // Until the fuzzy picker lands (M2), the file finders open the dashboard list.
+  ' ': ['Dashboard'],
+  ff: ['Dashboard'],
+};
 
 const REFRESH_ON_FOCUS_MS = 30_000;
 const REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -56,6 +69,9 @@ export class App {
   private dashboardOpen = true;
   private dashboardIndex = 0;
   private saveQueue: Promise<unknown> = Promise.resolve();
+  /** Keys typed after <leader>, or null when no leader sequence is pending. */
+  private leader: string | null = null;
+  private leaderTimer?: ReturnType<typeof setTimeout>;
 
   private dom = {
     bufferline: document.getElementById('bufferline')!,
@@ -76,6 +92,7 @@ export class App {
           { key: 'Mod-s', run: () => (this.write(), true), preventDefault: true },
         ]),
       ),
+      Prec.highest(EditorView.domEventHandlers({ keydown: (e, view) => this.onLeaderKey(e, view) })),
       ...editorExtensions((u) => this.onEditorUpdate(u)),
     ];
     this.view = new EditorView({ parent: this.dom.editor, state: createState('', this.extensions) });
@@ -372,6 +389,52 @@ export class App {
 
   // --------------------------------------------------------------- input
 
+  /**
+   * <leader> (Space) sequences. Handled here rather than with Vim.map: a
+   * mapping like <Space>fn only ever partially matches, and codemirror-vim
+   * prefers its built-in full match `<Space>` -> `l`.
+   */
+  private onLeaderKey(e: KeyboardEvent, view: EditorView): boolean {
+    const vim = getCM(view)?.state.vim;
+    if (!vim || vim.insertMode || e.isComposing) return false;
+
+    if (this.leader === null) {
+      const plain = e.key === ' ' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
+      // Space after f/t/r or an operator is a literal key for Vim.
+      if (!plain || vim.inputState.keyBuffer.length || vim.inputState.operator) return false;
+      this.leader = '';
+      this.message('<leader>');
+    } else if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {
+      return true;
+    } else if (e.key === 'Escape') {
+      this.endLeader();
+    } else {
+      const seq = this.leader + e.key;
+      const isPrefix = Object.keys(LEADER_MAPS).some((k) => k !== seq && k.startsWith(seq));
+      if (LEADER_MAPS[seq] && !isPrefix) {
+        this.endLeader();
+        const [name, arg = ''] = LEADER_MAPS[seq];
+        this.ex(name, false, arg);
+      } else if (isPrefix) {
+        this.leader = seq;
+        this.message(`<leader>${seq}`);
+      } else {
+        this.endLeader();
+        this.message(`<leader>${seq} は割り当てられていません`, 'warn');
+      }
+    }
+    e.preventDefault();
+    clearTimeout(this.leaderTimer);
+    if (this.leader !== null) this.leaderTimer = setTimeout(() => this.endLeader(), LEADER_TIMEOUT_MS);
+    return true;
+  }
+
+  private endLeader() {
+    this.leader = null;
+    clearTimeout(this.leaderTimer);
+    if (this.dom.cmdline.textContent?.startsWith('<leader>')) this.message('');
+  }
+
   private onEditorUpdate(u: ViewUpdate) {
     if (u.docChanged || u.selectionSet) {
       if (u.docChanged) this.renderBufferline();
@@ -564,16 +627,12 @@ export function configureVim() {
   // LazyVim-style keymaps (leader = Space).
   // codemirror-vim waits only 200ms for the second `j`; use Neovim's default timeoutlen.
   Vim.setOption('insertModeEscKeysTimeout', 1000);
-  // codemirror-vim binds <Space> to `l`; a full match beats the partial
-  // <Space>xx leader maps, so drop it as LazyVim does.
-  Vim.unmap('<Space>', undefined);
+  // Note: never Vim.unmap a built-in key. noremap expansion locates the
+  // built-in keymap by its original length, so removing one makes noremap
+  // see a user mapping (p -> "+p then re-expanded and dropped).
+  syncYanksToClipboard();
   Vim.map('jj', '<Esc>', 'insert');
   Vim.map('H', ':bprevious<CR>', 'normal');
   Vim.map('L', ':bnext<CR>', 'normal');
-  Vim.map('<Space>fn', ':new<CR>', 'normal');
-  Vim.map('<Space>bd', ':bdelete<CR>', 'normal');
-  Vim.map('<Space>qq', ':qall<CR>', 'normal');
-  // Until the fuzzy picker lands (M2), the file finders open the dashboard list.
-  Vim.map('<Space><Space>', ':Dashboard<CR>', 'normal');
-  Vim.map('<Space>ff', ':Dashboard<CR>', 'normal');
+  // <leader> maps live in App.onLeaderKey / LEADER_MAPS.
 }

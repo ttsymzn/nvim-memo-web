@@ -14,6 +14,7 @@ npm run build
 
 `?mock` を付けると GitHub に接続せず、メモリ上のリポジトリで動く。devtools から
 `__mock.externalWrite('example.md', 'text')` でターミナル側からの push を再現できる。
+クリップボードもメモリ上の偽物になり、`__clipboard.text = '…'` で他アプリでのコピーを再現できる。
 
 ## 接続
 
@@ -37,6 +38,7 @@ npm run build
 | `:new` / `<Space>fn` | タイムスタンプ名の新規メモ |
 | `:bn` `:bp` `:bd` `:ls` / `H` `L` `<Space>bd` | バッファ操作 |
 | `jj` | insert → normal |
+| `y` `d` `c` `x` / `p` `P` | OS のクリップボードと連携（Neovim の `clipboard=unnamedplus` 相当）。`"a` などのレジスタ指定時は従来どおり |
 | `<Space><Space>` / `<Space>ff` / `:Dashboard` | メモ一覧（M2 で fuzzy picker に置き換え予定） |
 | `:Sync` | リモートを取り込み |
 | `:Logout` | token を削除 |

@@ -79,6 +79,19 @@ async function main() {
     const transport = new MockTransport(MOCK_FILES);
     // Exposed for poking at the fake remote from devtools, e.g. __mock.externalWrite('x.md', 'hi')
     (window as unknown as { __mock: MockTransport }).__mock = transport;
+    // An in-memory clipboard, so y/p can be exercised without permission prompts.
+    // `__clipboard.text = '…'` simulates copying in another app.
+    const fakeClipboard = {
+      text: '',
+      async writeText(t: string) {
+        fakeClipboard.text = t;
+      },
+      async readText() {
+        return fakeClipboard.text;
+      },
+    };
+    Object.defineProperty(navigator, 'clipboard', { value: fakeClipboard, configurable: true });
+    (window as unknown as { __clipboard: typeof fakeClipboard }).__clipboard = fakeClipboard;
     const memory = new Map<string, unknown>();
     const store: KeyValueStore = {
       get: async <T>(k: string) => memory.get(k) as T | undefined,
