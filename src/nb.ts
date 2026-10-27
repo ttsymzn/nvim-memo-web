@@ -32,6 +32,19 @@ export function memoTitle(text: string): string {
   return lines.find((l) => l !== '') ?? '';
 }
 
+/**
+ * Like Vim, the final newline of a file is not an editable line: drop it when
+ * loading into the editor, so `G` lands on the last real line...
+ */
+export function toEditorText(fileText: string): string {
+  return fileText.endsWith('\n') ? fileText.slice(0, -1) : fileText;
+}
+
+/** ...and write it back on save (Vim's 'fixeol'). An empty buffer stays empty. */
+export function toFileText(editorText: string): string {
+  return editorText === '' ? '' : `${editorText}\n`;
+}
+
 /** Ex command arguments may name a file without the .md extension. */
 export function normalizeMemoName(arg: string): string {
   const name = arg.trim();

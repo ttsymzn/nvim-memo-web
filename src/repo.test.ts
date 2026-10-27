@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendToIndex, memoTitle, newMemoName, normalizeMemoName } from './nb';
+import { appendToIndex, memoTitle, newMemoName, normalizeMemoName, toEditorText, toFileText } from './nb';
 import { MockTransport } from './mock';
 import { MemoRepo, type KeyValueStore } from './repo';
 import type { Head } from './transport';
@@ -35,6 +35,16 @@ describe('nb helpers', () => {
   it('titles from heading or first line', () => {
     expect(memoTitle('\n# Title\nbody')).toBe('Title');
     expect(memoTitle('\n  first line\nsecond')).toBe('first line');
+  });
+  it('hides the final newline while editing and restores it on save', () => {
+    expect(toEditorText('a\nb\n')).toBe('a\nb');
+    expect(toEditorText('a\nb')).toBe('a\nb');
+    expect(toEditorText('a\n\n')).toBe('a\n');
+    expect(toEditorText('')).toBe('');
+    expect(toFileText('a\nb')).toBe('a\nb\n');
+    expect(toFileText('a\n')).toBe('a\n\n');
+    expect(toFileText('')).toBe('');
+    for (const t of ['x\n', 'x\n\n', '# t\nbody\n']) expect(toFileText(toEditorText(t))).toBe(t);
   });
   it('adds .md when no extension is given', () => {
     expect(normalizeMemoName('todo')).toBe('todo.md');

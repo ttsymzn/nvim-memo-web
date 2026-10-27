@@ -122,10 +122,55 @@ function imeEscape(): Extension {
   });
 }
 
+/**
+ * Normal/visual-mode keys typed with a Japanese IME on. codemirror-vim only
+ * turns single-character IME text into keys; when the IME keeps composing,
+ * the second key arrives as "ｇｇ" (or "gg") and was inserted into the memo.
+ * Feed only the characters not yet sent to Vim, one by one, and never insert.
+ */
+function imeNormalMode(): Extension {
+  // Text of the current composition that has already been sent to Vim.
+  let fed = '';
+  return [
+    Prec.highest(
+      EditorView.inputHandler.of((view, _from, _to, text) => {
+        const cm = getCM(view);
+        const vim = cm?.state.vim;
+        if (!cm || !vim || vim.insertMode || cm.curOp?.isVimOp) return false;
+        // f/t/r waiting for a literal character (e.g. fあ): codemirror-vim handles that.
+        if (vim.expectLiteralNext) return false;
+        const fresh = text.startsWith(fed) ? text.slice(fed.length) : text;
+        fed = text;
+        for (const ch of fresh) {
+          // Through the plugin, so 'langmap' turns ｇ into g.
+          cm.state.vimPlugin.handleKey({ key: ch, preventDefault() {}, stopPropagation() {} });
+        }
+        return true;
+      }),
+    ),
+    EditorView.domEventHandlers({
+      keydown(e) {
+        if (e.key !== 'Process') fed = '';
+        return false;
+      },
+      compositionstart() {
+        fed = '';
+        return false;
+      },
+      compositionend() {
+        // The final commit re-sends the whole text; clear only after it.
+        setTimeout(() => (fed = ''), 0);
+        return false;
+      },
+    }),
+  ];
+}
+
 export function editorExtensions(onUpdate: (u: ViewUpdate) => void): Extension[] {
   return [
     vim({ status: false }),
     imeEscape(),
+    imeNormalMode(),
     pasteFromClipboard(),
     relativeLineNumbers,
     highlightActiveLine(),

@@ -3,7 +3,7 @@ import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { Vim, getCM } from '@replit/codemirror-vim';
 import { syncYanksToClipboard } from './clipboard';
 import { createState, editorExtensions } from './editor';
-import { isMemoPath, memoTitle, newMemoName, normalizeMemoName } from './nb';
+import { isMemoPath, memoTitle, newMemoName, normalizeMemoName, toEditorText, toFileText } from './nb';
 import type { MemoRepo } from './repo';
 import { searchMemos, type SearchHit } from './search';
 
@@ -165,13 +165,13 @@ export class App {
         this.message(`"${path}" はリモートで削除されました`, 'warn');
         continue;
       }
-      if (remote.text === null || remote.text === buf.saved) continue;
+      if (remote.text === null || toEditorText(remote.text) === buf.saved) continue;
       if (this.isModified(buf)) {
         this.message(`W12: "${path}" はリモートでも変更されています（:w で上書き、:e! で読み直し）`, 'warn');
         continue;
       }
-      this.replaceText(buf, remote.text);
-      buf.saved = remote.text;
+      this.replaceText(buf, toEditorText(remote.text));
+      buf.saved = toEditorText(remote.text);
       this.message(`"${path}" をリモートの内容で更新しました`);
     }
     this.render();
@@ -228,7 +228,7 @@ export class App {
         this.message(`"${path}" はバイナリファイルのため開けません`, 'error');
         return;
       }
-      const text = file?.text ?? '';
+      const text = toEditorText(file?.text ?? '');
       this.buffers.set(path, { path, state: createState(text, this.extensions), saved: text, isNew: !file });
       if (!file) this.message(`"${path}" [New]`);
     }
@@ -308,14 +308,15 @@ export class App {
         return false;
       }
       const text = this.text(buf);
+      const fileText = toFileText(text);
       this.setSync('saving');
       try {
-        const result = await this.repo.save(path, text);
+        const result = await this.repo.save(path, fileText);
         buf.saved = text;
         buf.isNew = false;
         this.setSync('idle');
-        const lines = text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
-        const size = new TextEncoder().encode(text).length;
+        const lines = fileText === '' ? 0 : fileText.split('\n').length - 1;
+        const size = new TextEncoder().encode(fileText).length;
         const tag = result === 'added' ? ' [New]' : result === 'unchanged' ? ' (変更なし)' : '';
         this.message(`"${path}"${tag} ${lines}L, ${size}B written`);
         this.render();
@@ -373,7 +374,7 @@ export class App {
           // :e reloads from the repository; :e! also drops local changes.
           const buf = this.buffers.get(this.current)!;
           if (this.isModified(buf) && !bang) return this.message('E37: 変更が保存されていません（:e! で破棄）', 'error');
-          const remote = this.repo.get(buf.path)?.text ?? '';
+          const remote = toEditorText(this.repo.get(buf.path)?.text ?? '');
           this.replaceText(buf, remote);
           buf.saved = remote;
           return this.render();
