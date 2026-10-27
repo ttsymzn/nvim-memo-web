@@ -24,21 +24,66 @@ const MOCK_FILES: Record<string, string> = {
   '20261027072916.md': 'sample 書き込みできますか\n',
 };
 
-function start(transport: Transport, store: KeyValueStore, onLogout: () => void) {
+/** The running editor, kept across a re-login so open buffers survive a rejected token. */
+interface Session {
+  app: App;
+  /** Repository the session works on; null accepts any (the mock). */
+  repoKey: string | null;
+  /** Check a new token and switch the running session to it. Throws if GitHub rejects it. */
+  reauth(settings: Settings): Promise<void>;
+}
+
+let session: Session | undefined;
+
+const repoKey = (s: Settings) => `${s.owner}/${s.repo}@${s.branch}`;
+
+function start(transport: Transport, store: KeyValueStore, onLogout: () => void, mock = false): App {
   document.getElementById('login')!.hidden = true;
   document.getElementById('app')!.hidden = false;
   configureVim();
-  const app = new App(new MemoRepo(transport, store), onLogout);
+  const app = new App(new MemoRepo(transport, store), onLogout, () => void onAuthError(mock));
   void app.start();
   return app;
+}
+
+function startGitHub(settings: Settings) {
+  const transport = new GitHubTransport(settings.token, settings.owner, settings.repo, settings.branch);
+  session = {
+    app: start(transport, idbStore, logout),
+    repoKey: repoKey(settings),
+    async reauth(next) {
+      await new GitHubTransport(next.token, next.owner, next.repo, next.branch).getHead();
+      transport.setToken(next.token);
+    },
+  };
+}
+
+/** GitHub answered 401: forget the stored token and ask for a new one, keeping the editor alive. */
+async function onAuthError(mock: boolean) {
+  if (!mock) {
+    // Prefill the repository so the re-login matches this session and keeps it.
+    const old = await get<Settings>(SETTINGS_KEY);
+    const form = document.getElementById('login') as HTMLFormElement;
+    if (old) {
+      (form.elements.namedItem('repo') as HTMLInputElement).value = `${old.owner}/${old.repo}`;
+      (form.elements.namedItem('branch') as HTMLInputElement).value = old.branch;
+    }
+    await del(SETTINGS_KEY);
+  }
+  showLogin(
+    'token が無効になりました（401 Bad credentials）。期限切れか削除された可能性があります。' +
+      '新しい token で接続してください。開いているメモと未保存の編集はそのまま残ります。',
+  );
 }
 
 function showLogin(error?: string) {
   const form = document.getElementById('login') as HTMLFormElement;
   const errorEl = document.getElementById('login-error')!;
+  document.getElementById('app')!.hidden = true;
   form.hidden = false;
   errorEl.textContent = error ?? '';
   const token = form.elements.namedItem('token') as HTMLInputElement;
+  token.value = '';
   token.focus();
 
   form.onsubmit = async (e) => {
@@ -56,16 +101,34 @@ function showLogin(error?: string) {
       return;
     }
     errorEl.textContent = '接続を確認しています…';
-    const transport = new GitHubTransport(settings.token, owner, repo, settings.branch);
+
+    // Re-login to the same repository: keep the running editor and its unsaved edits.
+    if (session && (session.repoKey === null || session.repoKey === repoKey(settings))) {
+      try {
+        await session.reauth(settings);
+      } catch (err) {
+        errorEl.textContent = `接続できませんでした: ${(err as Error).message}`;
+        return;
+      }
+      if (session.repoKey !== null) await set(SETTINGS_KEY, settings);
+      token.value = '';
+      form.hidden = true;
+      document.getElementById('app')!.hidden = false;
+      session.app.reauthenticated();
+      return;
+    }
+
     try {
-      await transport.getHead();
+      await new GitHubTransport(settings.token, owner, repo, settings.branch).getHead();
     } catch (err) {
       errorEl.textContent = `接続できませんでした: ${(err as Error).message}`;
       return;
     }
     await set(SETTINGS_KEY, settings);
     token.value = '';
-    start(transport, idbStore, logout);
+    // A different repository: start over rather than mixing two repos' buffers.
+    if (session) return location.reload();
+    startGitHub(settings);
   };
 }
 
@@ -111,12 +174,19 @@ async function main() {
         };
       },
     });
-    start(slow, store, () => location.reload());
+    session = {
+      app: start(slow, store, () => location.reload(), true),
+      repoKey: null,
+      // Any token "works" for the mock: just stop answering 401.
+      async reauth() {
+        transport.setToken();
+      },
+    };
     return;
   }
   const settings = await get<Settings>(SETTINGS_KEY);
   if (!settings) return showLogin();
-  start(new GitHubTransport(settings.token, settings.owner, settings.repo, settings.branch), idbStore, logout);
+  startGitHub(settings);
 }
 
 void main();

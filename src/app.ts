@@ -2,6 +2,7 @@ import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { Vim, getCM } from '@replit/codemirror-vim';
 import { syncYanksToClipboard } from './clipboard';
+import { isAuthError } from './github';
 import { createState, editorExtensions } from './editor';
 import { isMemoPath, memoTitle, newMemoName, normalizeMemoName, toEditorText, toFileText } from './nb';
 import type { MemoRepo } from './repo';
@@ -91,9 +92,14 @@ export class App {
     cmdline: document.getElementById('cmdline')!,
   };
 
+  /** Set when GitHub rejected the token; syncing pauses until reauthenticated(). */
+  private authLost = false;
+
   constructor(
     private repo: MemoRepo,
     private onLogout: () => void,
+    /** Called once when GitHub answers 401: the host shows the login form. */
+    private onAuthError: () => void,
   ) {
     app = this;
     this.extensions = [
@@ -143,6 +149,7 @@ export class App {
   }
 
   async refresh() {
+    if (this.authLost) return;
     if (!navigator.onLine) return this.setSync('offline');
     this.setSync('syncing');
     try {
@@ -151,9 +158,33 @@ export class App {
       this.setSync('idle');
     } catch (e) {
       this.setSync('error');
-      this.message(`同期に失敗しました: ${(e as Error).message}`, 'error');
+      if (!this.handleAuthError(e)) this.message(`同期に失敗しました: ${(e as Error).message}`, 'error');
     }
     this.render();
+  }
+
+  /** On 401, stop syncing and hand over to the login form. Returns true if `e` was a 401. */
+  private handleAuthError(e: unknown): boolean {
+    if (!isAuthError(e)) return false;
+    this.message('token が無効になりました（401 Bad credentials）。新しい token で接続し直してください', 'error');
+    if (!this.authLost) {
+      this.authLost = true;
+      this.onAuthError();
+    }
+    return true;
+  }
+
+  /** The host swapped in a working token: resume syncing, keeping open buffers and unsaved edits. */
+  reauthenticated() {
+    this.authLost = false;
+    const unsaved = [...this.buffers.values()].filter((b) => this.isModified(b) || b.isNew).length;
+    this.message(
+      unsaved
+        ? `再接続しました。未保存のメモが ${unsaved} 件あります（:w または :wa で保存）`
+        : '再接続しました',
+    );
+    void this.refresh();
+    if (this.current && !this.dashboardOpen) this.view.focus();
   }
 
   private onRemoteChange(changed: string[]) {
@@ -325,7 +356,7 @@ export class App {
         return true;
       } catch (e) {
         this.setSync('error');
-        this.message(`保存に失敗しました: ${(e as Error).message}`, 'error');
+        if (!this.handleAuthError(e)) this.message(`保存に失敗しました: ${(e as Error).message}`, 'error');
         return false;
       }
     };

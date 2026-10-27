@@ -22,6 +22,11 @@ export class GitHubError extends Error {
   }
 }
 
+/** 401: the token itself was rejected (expired, deleted or mistyped), not just short of permissions. */
+export function isAuthError(e: unknown): boolean {
+  return e instanceof GitHubError && e.status === 401;
+}
+
 export class GitHubTransport implements Transport {
   readonly label: string;
 
@@ -32,6 +37,11 @@ export class GitHubTransport implements Transport {
     private branch: string,
   ) {
     this.label = `${owner}/${repo}@${branch}`;
+  }
+
+  /** Swap in a new token after the old one was rejected, keeping the open session. */
+  setToken(token: string) {
+    this.token = token;
   }
 
   private async rest<T>(method: string, path: string, body?: unknown): Promise<T> {

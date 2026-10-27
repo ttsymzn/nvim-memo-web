@@ -45,4 +45,6 @@ export interface Transport {
    * changed (or vanished) remotely since.
    */
   putFile(path: string, content: string, message: string, sha: string): Promise<PutResult | null>;
+  /** Use a new access token from now on (after the old one was rejected). */
+  setToken(token: string): void;
 }

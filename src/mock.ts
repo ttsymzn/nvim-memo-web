@@ -1,3 +1,4 @@
+import { GitHubError } from './github';
 import type { FileChange, Head, PutResult, Transport, TreeEntry } from './transport';
 
 interface MockCommit {
@@ -15,7 +16,17 @@ export class MockTransport implements Transport {
   ref: string;
   /** Commit messages in push order, for inspection in tests and the console. */
   log: string[] = [];
+  /** Set to true (e.g. `__mock.tokenRevoked = true`) to answer every request with 401 Bad credentials. */
+  tokenRevoked = false;
   private seq = 0;
+
+  setToken() {
+    this.tokenRevoked = false;
+  }
+
+  private checkToken() {
+    if (this.tokenRevoked) throw new GitHubError('GET /branches/main: 401 Bad credentials', 401);
+  }
 
   constructor(files: Record<string, string> = {}) {
     const entries = Object.entries(files).map(([path, text]) => ({ path, sha: this.writeBlob(text) }));
@@ -42,18 +53,22 @@ export class MockTransport implements Transport {
   }
 
   async getHead(): Promise<Head> {
+    this.checkToken();
     return { commit: this.ref, tree: this.commits.get(this.ref)!.tree };
   }
 
   async listTree(tree: string): Promise<TreeEntry[]> {
+    this.checkToken();
     return [...this.trees.get(tree)!];
   }
 
   async getBlobs(shas: string[]) {
+    this.checkToken();
     return new Map(shas.map((s) => [s, this.blobs.get(s) ?? null] as const));
   }
 
   async createCommit(head: Head, changes: FileChange[], message: string) {
+    this.checkToken();
     const map = new Map(this.trees.get(head.tree)!.map((e) => [e.path, e.sha]));
     for (const c of changes) {
       if (c.content === null) map.delete(c.path);
@@ -65,6 +80,7 @@ export class MockTransport implements Transport {
   }
 
   async putFile(path: string, content: string, message: string, sha: string): Promise<PutResult | null> {
+    this.checkToken();
     const current = await this.getHead();
     // Like the Contents API: refuse when the file is not at the blob the caller saw.
     if (this.trees.get(current.tree)!.find((e) => e.path === path)?.sha !== sha) return null;
