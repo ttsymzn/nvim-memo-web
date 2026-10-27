@@ -5,6 +5,7 @@ import { syncYanksToClipboard } from './clipboard';
 import { createState, editorExtensions } from './editor';
 import { isMemoPath, memoTitle, newMemoName, normalizeMemoName } from './nb';
 import type { MemoRepo } from './repo';
+import { searchMemos, type SearchHit } from './search';
 
 interface Buffer {
   path: string;
@@ -50,6 +51,13 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
+/** Append `text` to `parent`, wrapping each case-insensitive match of a query term in <mark>. */
+function appendHighlighted(parent: HTMLElement, text: string, query: string) {
+  const terms = query.split(/\s+/).filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(${terms.join('|')})`, 'gi');
+  text.split(re).forEach((part, i) => parent.append(i % 2 ? el('mark', '', part) : part));
+}
+
 /** 20261027072916.md -> 2026-10-27 07:29 */
 function formatStamp(path: string): string {
   const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})\d{2}\.md$/.exec(path);
@@ -68,6 +76,8 @@ export class App {
   private lastRefresh = 0;
   private dashboardOpen = true;
   private dashboardIndex = 0;
+  /** Text typed into the dashboard's `/` search; '' shows every memo. */
+  private dashboardQuery = '';
   private saveQueue: Promise<unknown> = Promise.resolve();
   /** Keys typed after <leader>, or null when no leader sequence is pending. */
   private leader: string | null = null;
@@ -210,7 +220,8 @@ export class App {
     this.view.focus();
   }
 
-  open(path: string) {
+  /** Open (or switch to) a memo; `at` puts the cursor at that offset, e.g. a search match. */
+  open(path: string, at?: number) {
     if (!this.buffers.has(path)) {
       const file = this.repo.get(path);
       if (file && file.text === null) {
@@ -222,6 +233,10 @@ export class App {
       if (!file) this.message(`"${path}" [New]`);
     }
     this.show(path);
+    if (at !== undefined) {
+      const anchor = Math.min(at, this.view.state.doc.length);
+      this.view.dispatch({ selection: { anchor }, scrollIntoView: true });
+    }
   }
 
   newMemo() {
@@ -450,46 +465,101 @@ export class App {
     }
   }
 
-  /** Timestamped memos newest first, then other names alphabetically. */
-  private dashboardItems() {
+  /**
+   * Dashboard rows: all memos (timestamped newest first, then other names
+   * alphabetically), or the hits of the current `/` search.
+   */
+  private dashboardItems(): SearchHit[] {
     const stamped = (p: string) => formatStamp(p) !== '';
-    return this.repo
+    const files = this.repo
       .files()
       .filter((f) => isMemoPath(f.path))
       .sort((a, b) => {
         if (stamped(a.path) !== stamped(b.path)) return stamped(a.path) ? -1 : 1;
         return stamped(a.path) ? b.path.localeCompare(a.path) : a.path.localeCompare(b.path);
       });
+    if (this.dashboardQuery) return searchMemos(files, this.dashboardQuery);
+    return files.map((file) => ({ file, offset: -1, line: '' }));
+  }
+
+  private openHit(hit: SearchHit | undefined) {
+    if (!hit) return;
+    this.dashboardQuery = '';
+    this.open(hit.file.path, hit.offset >= 0 ? hit.offset : undefined);
+  }
+
+  private moveDashboard(i: number) {
+    const count = this.dashboardItems().length;
+    this.dashboardIndex = Math.max(0, Math.min(count - 1, i));
+    this.renderDashboard();
   }
 
   private onDashboardKey(e: KeyboardEvent) {
     if (!this.dashboardOpen || e.ctrlKey || e.metaKey || e.altKey) return;
     if ((e.target as HTMLElement).closest('input, textarea')) return;
-    const items = this.dashboardItems();
-    const move = (i: number) => {
-      this.dashboardIndex = Math.max(0, Math.min(items.length - 1, i));
-      this.renderDashboard();
-    };
+    // With the IME on, / arrives as "Process" (code Slash) or as ／ / ・.
+    const key = e.key === 'Process' && e.code === 'Slash' ? '/' : e.key === '／' || e.key === '・' ? '/' : e.key;
     const keys: Record<string, () => void> = {
-      j: () => move(this.dashboardIndex + 1),
-      ArrowDown: () => move(this.dashboardIndex + 1),
-      k: () => move(this.dashboardIndex - 1),
-      ArrowUp: () => move(this.dashboardIndex - 1),
-      g: () => move(0),
-      G: () => move(items.length - 1),
-      Enter: () => items[this.dashboardIndex] && this.open(items[this.dashboardIndex].path),
-      l: () => items[this.dashboardIndex] && this.open(items[this.dashboardIndex].path),
+      j: () => this.moveDashboard(this.dashboardIndex + 1),
+      ArrowDown: () => this.moveDashboard(this.dashboardIndex + 1),
+      k: () => this.moveDashboard(this.dashboardIndex - 1),
+      ArrowUp: () => this.moveDashboard(this.dashboardIndex - 1),
+      g: () => this.moveDashboard(0),
+      G: () => this.moveDashboard(Infinity),
+      Enter: () => this.openHit(this.dashboardItems()[this.dashboardIndex]),
+      l: () => this.openHit(this.dashboardItems()[this.dashboardIndex]),
       n: () => this.newMemo(),
       r: () => void this.refresh(),
-      Escape: () => this.hideDashboard(),
+      '/': () => this.searchPrompt(),
+      // Esc first clears a search, then leaves the dashboard.
+      Escape: () => (this.dashboardQuery ? this.setDashboardQuery('') : this.hideDashboard()),
       q: () => this.hideDashboard(),
       ':': () => this.prompt(),
     };
-    const fn = keys[e.key];
+    const fn = keys[key];
     if (fn) {
       e.preventDefault();
       fn();
     }
+  }
+
+  private setDashboardQuery(query: string) {
+    this.dashboardQuery = query;
+    this.dashboardIndex = 0;
+    this.renderDashboard();
+  }
+
+  /** `/` on the dashboard: search all memos as you type (Telescope-style). */
+  private searchPrompt() {
+    const input = el('input', 'prompt');
+    input.setAttribute('aria-label', 'メモを検索');
+    input.value = this.dashboardQuery;
+    this.dom.cmdline.replaceChildren(el('span', '', '/'), input);
+    this.dom.cmdline.dataset.level = 'info';
+    input.focus();
+    input.addEventListener('input', () => {
+      // The IME may have typed the / that opened this prompt as ／ or ・.
+      if (/^[／・]/.test(input.value)) input.value = input.value.slice(1);
+      this.setDashboardQuery(input.value.trim());
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.isComposing) return; // Enter / arrows while the IME is converting
+      const down = e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n');
+      const up = e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p');
+      if (down || up) {
+        e.preventDefault();
+        this.moveDashboard(this.dashboardIndex + (down ? 1 : -1));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        this.dom.cmdline.replaceChildren();
+        this.openHit(this.dashboardItems()[this.dashboardIndex]);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this.dom.cmdline.replaceChildren();
+        this.setDashboardQuery('');
+      }
+    });
+    input.addEventListener('blur', () => input.isConnected && this.dom.cmdline.replaceChildren());
   }
 
   /** A minimal `:` prompt for the dashboard, where no editor has focus. */
@@ -572,25 +642,40 @@ export class App {
     };
     actions.append(
       action('n', '新規メモ', () => this.newMemo()),
+      action('/', 'メモを検索', () => this.searchPrompt()),
       action('r', '同期', () => void this.refresh()),
       action(':', 'コマンド', () => this.prompt()),
     );
 
+    const query = this.dashboardQuery;
     const list = el('div', 'dash-list');
-    list.append(el('div', 'dash-heading', `メモ (${items.length})`));
-    items.forEach((f, i) => {
+    list.append(el('div', 'dash-heading', query ? `検索: ${query} (${items.length})` : `メモ (${items.length})`));
+    items.forEach((hit, i) => {
+      const f = hit.file;
       const row = el('button', 'dash-item' + (i === this.dashboardIndex ? ' selected' : ''));
-      row.append(
-        el('span', 'dash-date', formatStamp(f.path) || f.path),
-        el('span', 'dash-title', f.text === null ? '(binary)' : memoTitle(f.text) || '(空)'),
-      );
+      const title = el('span', 'dash-title');
+      if (query && hit.line) {
+        appendHighlighted(title, hit.line, query);
+      } else {
+        title.textContent = f.text === null ? '(binary)' : memoTitle(f.text) || '(空)';
+      }
+      row.append(el('span', 'dash-date', formatStamp(f.path) || f.path), title);
       row.title = f.path;
-      row.addEventListener('click', () => this.open(f.path));
+      row.addEventListener('click', () => this.openHit(hit));
       list.append(row);
     });
-    if (!items.length) list.append(el('div', 'dash-empty', this.sync === 'syncing' ? '読み込み中…' : 'メモがありません'));
+    if (!items.length) {
+      const empty = query ? '一致するメモはありません' : this.sync === 'syncing' ? '読み込み中…' : 'メモがありません';
+      list.append(el('div', 'dash-empty', empty));
+    }
 
-    const footer = el('div', 'dash-footer', 'j/k 移動 · Enter 開く · n 新規 · r 同期 · q 戻る');
+    const footer = el(
+      'div',
+      'dash-footer',
+      query
+        ? '↑/↓ 選択 · Enter 開く · Esc 検索をやめる'
+        : 'j/k 移動 · Enter 開く · / 検索 · n 新規 · r 同期 · q 戻る',
+    );
     this.dom.dashboard.replaceChildren(el('pre', 'logo', LOGO), el('div', 'dash-sub', 'memo'), actions, list, footer);
     list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
   }

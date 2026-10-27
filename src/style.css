@@ -276,6 +276,12 @@ button {
   white-space: nowrap;
 }
 
+.dash-title mark {
+  background: none;
+  color: var(--orange);
+  font-weight: bold;
+}
+
 .dash-empty,
 .dash-footer {
   color: var(--comment);
