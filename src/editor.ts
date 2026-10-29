@@ -61,17 +61,13 @@ const tagHighlight = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 );
 
-/** Matches `jj` typed while a Japanese IME is on: ｊｊ, っｊ, ッｊ (or their ASCII forms). */
-const JJ_IN_IME = /(?:[jｊ][jｊ]|[っッ][jｊ])$/;
-
 /**
  * Leave insert mode while a Japanese IME is active. With the IME on, keydown
- * reports `key: "Process"`, which codemirror-vim ignores, so neither Esc nor
- * the `jj` mapping would reach Vim.
+ * reports `key: "Process"`, which codemirror-vim ignores, so Esc would not
+ * reach Vim.
  */
 function imeEscape(): Extension {
   let escAfterComposition = false;
-  let jjSuffix: string | null = null;
   const inInsert = (view: EditorView) => !!getCM(view)?.state.vim?.insertMode;
   const toNormal = (view: EditorView) => {
     const cm = getCM(view);
@@ -92,31 +88,11 @@ function imeEscape(): Extension {
       }
       return false;
     },
-    compositionupdate(e, view) {
-      const m = inInsert(view) ? JJ_IN_IME.exec(e.data) : null;
-      if (m) {
-        jjSuffix = m[0];
-        // Blurring commits the composition, which fires compositionend.
-        view.contentDOM.blur();
-        setTimeout(() => view.focus(), 0);
-      }
-      return false;
-    },
     compositionend(_e, view) {
-      if (!escAfterComposition && jjSuffix === null) return false;
-      const suffix = jjSuffix;
+      if (!escAfterComposition) return false;
       escAfterComposition = false;
-      jjSuffix = null;
       // Let CodeMirror apply the committed text first.
-      setTimeout(() => {
-        if (suffix) {
-          const head = view.state.selection.main.head;
-          if (view.state.sliceDoc(head - suffix.length, head) === suffix) {
-            view.dispatch({ changes: { from: head - suffix.length, to: head } });
-          }
-        }
-        toNormal(view);
-      }, 0);
+      setTimeout(() => toNormal(view), 0);
       return false;
     },
   });
