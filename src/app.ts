@@ -770,14 +770,11 @@ export function configureVim() {
   define('Logout', 'Logout');
 
   // LazyVim-style keymaps (leader = Space).
-  // codemirror-vim waits only 200ms for the second `j`; use Neovim's default timeoutlen.
-  Vim.setOption('insertModeEscKeysTimeout', 1000);
   Vim.setOption('langmap', imeLangmap());
   // Note: never Vim.unmap a built-in key. noremap expansion locates the
   // built-in keymap by its original length, so removing one makes noremap
   // see a user mapping (p -> "+p then re-expanded and dropped).
   syncYanksToClipboard();
-  Vim.map('jj', '<Esc>', 'insert');
   Vim.map('H', ':bprevious<CR>', 'normal');
   Vim.map('L', ':bnext<CR>', 'normal');
   // <leader> maps live in App.onLeaderKey / LEADER_MAPS.

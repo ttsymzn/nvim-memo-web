@@ -38,7 +38,6 @@ npm run build
 | `:e <name>` | 開く / 新規（拡張子省略時は `.md`）。引数なしで再読み込み、`:e!` で変更を破棄 |
 | `:new` / `<Space>fn` | タイムスタンプ名の新規メモ |
 | `:bn` `:bp` `:bd` `:ls` / `H` `L` `<Space>bd` | バッファ操作 |
-| `jj` | insert → normal |
 | `y` `d` `c` `x` / `p` `P` | OS のクリップボードと連携（Neovim の `clipboard=unnamedplus` 相当）。`"a` などのレジスタ指定時は従来どおり |
 | `<Space><Space>` / `<Space>ff` / `:Dashboard` | メモ一覧（M2 で fuzzy picker に置き換え予定） |
 | `:Sync` | リモートを取り込み |
