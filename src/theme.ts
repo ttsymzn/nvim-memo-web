@@ -35,6 +35,8 @@ const editorTheme = EditorView.theme(
     '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
       backgroundColor: `${c.bgVisual} !important`,
     },
+    // Insert-mode bar cursor; CodeMirror's dark default (1.2px #444) is nearly invisible on bg.
+    '.cm-cursor, .cm-dropCursor': { borderLeft: `2px solid ${c.fg}`, marginLeft: '-1px' },
     '.cm-fat-cursor': { background: `${c.fg} !important`, color: `${c.bg} !important` },
     '&:not(.cm-focused) .cm-fat-cursor': { background: 'none !important', outline: `1px solid ${c.fg}` },
     '.cm-searchMatch': { backgroundColor: '#3d59a1', outline: 'none' },
