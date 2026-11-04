@@ -175,4 +175,23 @@ describe('MemoRepo', () => {
     expect(await again.loadCache()).toBe(true);
     expect(again.get('20261025235729.md')?.text).toBe(seed['20261025235729.md']);
   });
+
+  it('a save still succeeds when the snapshot cannot be cached', async () => {
+    const t = new MockTransport(seed);
+    let failing = false;
+    const store = memoryStore();
+    const flaky: KeyValueStore = {
+      get: (k) => store.get(k),
+      set: async (k, v) => {
+        if (failing) throw new DOMException('The database connection is closing.', 'InvalidStateError');
+        return store.set(k, v);
+      },
+    };
+    const repo = new MemoRepo(t, flaky);
+    await repo.refresh();
+    failing = true;
+    expect(await repo.save('example.md', 'hello!\n')).toBe('edited');
+    expect(await t.readFile('example.md')).toBe('hello!\n');
+    expect(repo.get('example.md')?.text).toBe('hello!\n');
+  });
 });
