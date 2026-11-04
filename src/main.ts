@@ -1,6 +1,6 @@
-import { del, get, set } from 'idb-keyval';
 import { App, configureVim } from './app';
 import { GitHubTransport } from './github';
+import { idbDel, idbGet, idbSet } from './idb';
 import { MockTransport } from './mock';
 import { MemoRepo, type KeyValueStore } from './repo';
 import type { Transport } from './transport';
@@ -14,7 +14,7 @@ interface Settings {
 }
 
 const SETTINGS_KEY = 'settings';
-const idbStore: KeyValueStore = { get: (k) => get(k), set: (k, v) => set(k, v) };
+const idbStore: KeyValueStore = { get: idbGet, set: idbSet };
 
 const MOCK_FILES: Record<string, string> = {
   '.index': 'example.md\n20261025235729.md\n20261026000310.md\n20261027072916.md\n',
@@ -62,13 +62,13 @@ function startGitHub(settings: Settings) {
 async function onAuthError(mock: boolean) {
   if (!mock) {
     // Prefill the repository so the re-login matches this session and keeps it.
-    const old = await get<Settings>(SETTINGS_KEY);
+    const old = await idbGet<Settings>(SETTINGS_KEY);
     const form = document.getElementById('login') as HTMLFormElement;
     if (old) {
       (form.elements.namedItem('repo') as HTMLInputElement).value = `${old.owner}/${old.repo}`;
       (form.elements.namedItem('branch') as HTMLInputElement).value = old.branch;
     }
-    await del(SETTINGS_KEY);
+    await idbDel(SETTINGS_KEY);
   }
   showLogin(
     'token が無効になりました（401 Bad credentials）。期限切れか削除された可能性があります。' +
@@ -110,7 +110,7 @@ function showLogin(error?: string) {
         errorEl.textContent = `接続できませんでした: ${(err as Error).message}`;
         return;
       }
-      if (session.repoKey !== null) await set(SETTINGS_KEY, settings);
+      if (session.repoKey !== null) await idbSet(SETTINGS_KEY, settings);
       token.value = '';
       form.hidden = true;
       document.getElementById('app')!.hidden = false;
@@ -124,7 +124,7 @@ function showLogin(error?: string) {
       errorEl.textContent = `接続できませんでした: ${(err as Error).message}`;
       return;
     }
-    await set(SETTINGS_KEY, settings);
+    await idbSet(SETTINGS_KEY, settings);
     token.value = '';
     // A different repository: start over rather than mixing two repos' buffers.
     if (session) return location.reload();
@@ -133,7 +133,7 @@ function showLogin(error?: string) {
 }
 
 async function logout() {
-  await del(SETTINGS_KEY);
+  await idbDel(SETTINGS_KEY);
   location.reload();
 }
 
@@ -184,7 +184,7 @@ async function main() {
     };
     return;
   }
-  const settings = await get<Settings>(SETTINGS_KEY);
+  const settings = await idbGet<Settings>(SETTINGS_KEY);
   if (!settings) return showLogin();
   startGitHub(settings);
 }

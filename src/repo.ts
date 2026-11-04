@@ -97,7 +97,13 @@ export class MemoRepo {
   private async persist() {
     if (!this.head) return;
     const cache: CacheShape = { head: this.head, entries: this.entries, blobs: [...this.blobs] };
-    await this.store.set(this.cacheKey, cache);
+    try {
+      await this.store.set(this.cacheKey, cache);
+    } catch (e) {
+      // Only a cache: the commit already reached GitHub, so a failed write
+      // must not turn a successful save into an error (and block :wq).
+      console.warn('Failed to cache the repository snapshot', e);
+    }
   }
 
   private async blobText(sha: string): Promise<string | null> {
