@@ -190,3 +190,12 @@ async function main() {
 }
 
 void main();
+
+// ホーム画面に追加したときに PWA として動かすための Service Worker（本番ビルドのみ）。
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err) => {
+      console.warn('service worker registration failed', err);
+    });
+  });
+}
