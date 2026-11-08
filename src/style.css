@@ -51,6 +51,8 @@ button {
   display: grid;
   grid-template-rows: auto 1fr auto auto;
   height: 100dvh;
+  /* ホーム画面から起動したとき（viewport-fit=cover）にノッチやホームバーと重ならないように */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 #main {

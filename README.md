@@ -29,6 +29,16 @@ npm run build
 `main` に push すると GitHub Actions で GitHub Pages に公開される。
 初回だけ、リポジトリの Settings → Pages → Source を **GitHub Actions** にする。
 
+## スマホのホーム画面に追加
+
+PWA 対応（`public/manifest.json`・`public/sw.js`・`public/icons/`）なので、公開した URL をスマホで開いてホーム画面に追加すると、
+アイコンから全画面のアプリとして起動できる。
+
+- iPhone（Safari）: 共有ボタン → **ホーム画面に追加**
+- Android（Chrome）: メニュー → **ホーム画面に追加** / **アプリをインストール**
+
+アイコンの元絵は `public/icons/icon.svg`。
+
 ## 操作（M1 時点）
 
 | キー / コマンド | 動作 |
