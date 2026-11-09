@@ -1,7 +1,7 @@
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { Vim, getCM } from '@replit/codemirror-vim';
-import { trapBackKey } from './backkey';
+import { clearKeyLog, keyLog, trapBackKey } from './backkey';
 import { syncYanksToClipboard } from './clipboard';
 import { isAuthError } from './github';
 import { createState, editorExtensions } from './editor';
@@ -435,6 +435,13 @@ export class App {
         return void this.refresh();
       case 'Logout':
         return this.onLogout();
+      case 'KeyLog':
+        // Esc / back events recorded across app restarts (:KeyLog! clears them).
+        if (bang) {
+          clearKeyLog();
+          return this.message('キーログを消去しました');
+        }
+        return this.message(keyLog());
     }
     this.message(`E492: エディタのコマンドではありません: ${name}`, 'error');
   }
@@ -770,6 +777,7 @@ export function configureVim() {
   define('Dashboard', 'Dashboard');
   define('Sync', 'Sync');
   define('Logout', 'Logout');
+  define('KeyLog', 'KeyLog');
 
   // LazyVim-style keymaps (leader = Space).
   Vim.setOption('langmap', imeLangmap());
