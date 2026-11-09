@@ -1,6 +1,7 @@
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { Vim, getCM } from '@replit/codemirror-vim';
+import { trapBackKey } from './backkey';
 import { syncYanksToClipboard } from './clipboard';
 import { isAuthError } from './github';
 import { createState, editorExtensions } from './editor';
@@ -124,6 +125,7 @@ export class App {
 
     repo.onChange((changed) => this.onRemoteChange(changed));
     document.addEventListener('keydown', (e) => this.onDashboardKey(e));
+    trapBackKey();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Date.now() - this.lastRefresh > REFRESH_ON_FOCUS_MS) {
         void this.refresh();
