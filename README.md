@@ -41,6 +41,8 @@ PWA 対応（`public/manifest.json`・`public/sw.js`・`public/icons/`）なの�
 
 ## 操作（M1 時点）
 
+Vim キーバインドの詳しい説明は [docs/vim-bindings.md](docs/vim-bindings.md) を参照。
+
 | キー / コマンド | 動作 |
 |---|---|
 | `:w` / `<C-s>` | 保存（`[nb] Edit:` / `[nb] Add:` で 1 コミット。新規なら `.index` にも追記） |
