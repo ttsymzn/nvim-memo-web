@@ -80,8 +80,9 @@ function imeEscape(): Extension {
       if (e.isComposing || view.composing) {
         // The IME consumes this Esc to cancel the composition; follow up once it has.
         escAfterComposition = true;
-      } else if (e.key === 'Process' || e.keyCode === 229) {
-        // IME on but nothing being composed: Vim ignores "Process", so leave insert mode here.
+      } else if (e.key === 'Process' || e.key === 'Unidentified' || e.keyCode === 229) {
+        // IME on but nothing being composed: Vim ignores "Process" (Android: "Unidentified"),
+        // so leave insert mode here.
         e.preventDefault();
         toNormal(view);
         return true;

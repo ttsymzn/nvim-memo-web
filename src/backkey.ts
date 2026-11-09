@@ -1,30 +1,49 @@
 /**
- * Turn Android's "back" into Esc.
+ * Turn Android's "back" into Esc, so Esc never closes the app.
  *
  * On Android, Esc on a hardware / Bluetooth keyboard is also the system back
- * key. When the page does not consume the keydown (always the case while an
- * IME is on: it arrives as key "Unidentified" / keyCode 229), the browser goes
- * back in history, and an installed PWA with no history simply closes — so Esc
- * quit the app instead of returning to Normal mode.
+ * key: when the page does not consume the keydown (always the case with the
+ * IME on, where it arrives as key "Unidentified" / keyCode 229, often with no
+ * `code`), the browser goes back in history, and an installed PWA with no
+ * history to go back to closes.
  *
- * Keep one extra history entry on top. When back pops it, run Esc on whatever
- * has focus (the editor, the `:` / `/` prompt, the dashboard) and put the entry
- * back. Chrome skips history entries that were added without a user gesture,
- * so the entry is (re-)added on the next key press or tap, never from popstate.
+ * So keep a stack of extra history entries on top of the page. When back pops
+ * one, run Esc on whatever has focus (the editor, the `:` / `/` prompt, the
+ * dashboard) instead.
+ *
+ * Chrome's history-manipulation intervention makes back *skip* an entry the
+ * user never interacted with while it was current — an entry pushed at load,
+ * or from popstate, is useless and back would close the app anyway. So
+ * entries are only pushed from a tap or key press (with user activation),
+ * one per interaction, up to MAX_DEPTH: by the time the user presses Esc a few
+ * times in a row there are several real entries to pop.
  */
 
-/** A real Esc keydown within this window already did the work; back only re-arms. */
+const MAX_DEPTH = 30;
+/** A real Esc keydown within this window already did the work; back only pops. */
 const HANDLED_ESC_MS = 500;
-const MARK = 'nvim-memo-back-trap';
+const KEY = 'nvimMemoBackDepth';
+
+const depthOf = (state: unknown) => {
+  const d = (state as Record<string, unknown> | null)?.[KEY];
+  return typeof d === 'number' ? d : 0;
+};
+
+export function isEscapeKey(e: KeyboardEvent) {
+  return e.key === 'Escape' || e.code === 'Escape' || e.keyCode === 27;
+}
 
 export function trapBackKey() {
-  let armed = history.state?.[MARK] === true;
+  let depth = depthOf(history.state);
   let lastEsc = 0;
 
-  const arm = () => {
-    if (armed) return;
-    history.pushState({ ...history.state, [MARK]: true }, '');
-    armed = true;
+  /** Push one more entry, only while the page has fresh user activation. */
+  const grow = () => {
+    if (depth >= MAX_DEPTH) return;
+    const ua = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+    if (ua && !ua.isActive) return;
+    depth += 1;
+    history.pushState({ ...(history.state as object | null), [KEY]: depth }, '');
   };
 
   const sendEscape = () => {
@@ -34,31 +53,26 @@ export function trapBackKey() {
     );
   };
 
-  window.addEventListener(
-    'keydown',
-    (e) => {
-      if (!e.isTrusted) return;
-      if (e.key === 'Escape') {
-        lastEsc = Date.now();
-        // Vim may have handled Esc without preventDefault; don't let it fall through to "back".
-        e.preventDefault();
-      } else {
-        arm();
-      }
-    },
-    // Bubble phase: CodeMirror ignores events that are already defaultPrevented.
-    false,
-  );
-  // Taps and typing (keydown with the IME on) count as user activation.
-  window.addEventListener('pointerdown', arm);
-  window.addEventListener('input', arm);
-
-  window.addEventListener('popstate', () => {
-    armed = history.state?.[MARK] === true;
-    if (armed) return; // went forward onto our entry
-    if (Date.now() - lastEsc > HANDLED_ESC_MS) sendEscape();
-    arm();
+  window.addEventListener('keydown', (e) => {
+    if (!e.isTrusted) return;
+    if (isEscapeKey(e)) {
+      lastEsc = Date.now();
+      // Whatever handled it (or nothing did): Esc must not fall through to "back".
+      // Bubble phase, since CodeMirror ignores events already defaultPrevented.
+      e.preventDefault();
+    } else {
+      grow();
+    }
   });
+  // Activation-triggering events on touch screens (pointerdown is not one).
+  for (const type of ['pointerup', 'touchend', 'click', 'input']) {
+    window.addEventListener(type, grow, { passive: true });
+  }
 
-  arm();
+  window.addEventListener('popstate', (e) => {
+    const next = depthOf(e.state);
+    const wentBack = next < depth;
+    depth = next;
+    if (wentBack && Date.now() - lastEsc > HANDLED_ESC_MS) sendEscape();
+  });
 }
