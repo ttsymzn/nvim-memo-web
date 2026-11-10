@@ -1,3 +1,54 @@
+/*
+ * 英数字は JetBrains Mono、それ以外（日本語・→・①・※・× など）は BIZ UDGothic で全角幅に揃える。
+ * JetBrains Mono は ↑↓ や … “ ” × ° などを半角幅で持っているため、Google Fonts の
+ * 定義をそのまま使うとこれらだけ小さく表示されてしまう。そこで unicode-range から
+ * East Asian Ambiguous な記号を外した独自の @font-face を定義し、BIZ UDGothic に回す。
+ * （フォントファイルは Google Fonts の JetBrains Mono v24 をそのまま参照）
+ */
+@font-face {
+  font-family: 'Memo Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwhsk.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF,
+    U+1E00-1E9F, U+1EF2-1EFF, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Memo Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2) format('woff2');
+  unicode-range: U+0000-00A6, U+00A9-00AF, U+00B2-00B3, U+00B5, U+00B7-00D6, U+00D8-00F6, U+00F8-00FF,
+    U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-200F, U+2011-2012, U+2017, U+201A-201B, U+201E-201F, U+2022-2024, U+2027-202F,
+    U+2031, U+2034-203A, U+203C-206F, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Memo Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwhsk.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF,
+    U+1E00-1E9F, U+1EF2-1EFF, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Memo Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2) format('woff2');
+  unicode-range: U+0000-00A6, U+00A9-00AF, U+00B2-00B3, U+00B5, U+00B7-00D6, U+00D8-00F6, U+00F8-00FF,
+    U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-200F, U+2011-2012, U+2017, U+201A-201B, U+201E-201F, U+2022-2024, U+2027-202F,
+    U+2031, U+2034-203A, U+203C-206F, U+20AC, U+2122, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   --bg: #1a1b26;
   --bg-dark: #16161e;
@@ -15,7 +66,7 @@
   --green: #9ece6a;
   --teal: #1abc9c;
   --red: #f7768e;
-  --mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, Consolas, 'BIZ UDGothic', monospace;
+  --mono: 'Memo Mono', 'BIZ UDGothic', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
   color-scheme: dark;
 }
 
