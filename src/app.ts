@@ -84,6 +84,8 @@ export class App {
   /** Keys typed after <leader>, or null when no leader sequence is pending. */
   private leader: string | null = null;
   private leaderTimer?: ReturnType<typeof setTimeout>;
+  /** Time of a first `d` on the dashboard, waiting for the second (`dd` deletes). */
+  private pendingD = 0;
 
   private dom = {
     bufferline: document.getElementById('bufferline')!,
@@ -373,6 +375,91 @@ export class App {
     }
   }
 
+  // -------------------------------------------------------------- delete
+
+  /**
+   * :Delete — delete a memo from the repository (`[nb] Delete:` commit, also
+   * dropped from `.index`) and close its buffer. Asks first unless `force`.
+   */
+  async deleteMemo(path: string, force = false): Promise<boolean> {
+    const buf = this.buffers.get(path);
+    const inRepo = !!this.repo.get(path);
+    if (!inRepo && !buf) {
+      this.message(`E: "${path}" というメモはありません`, 'error');
+      return false;
+    }
+    if (!force && !(await this.confirm(`"${path}" を削除しますか？ (y/N) `))) {
+      this.message('削除を取り消しました');
+      if (!this.dashboardOpen && this.current) this.view.focus();
+      return false;
+    }
+    if (!inRepo) {
+      // Never saved: only the buffer exists.
+      this.close(path, true);
+      this.message(`"${path}" は未保存だったのでバッファだけ閉じました`);
+      return true;
+    }
+    if (!navigator.onLine) {
+      this.message('オフラインのため削除できません', 'error');
+      return false;
+    }
+    const run = async () => {
+      this.setSync('saving');
+      try {
+        const removed = await this.repo.remove(path);
+        this.setSync('idle');
+        this.close(path, true);
+        this.message(removed ? `"${path}" を削除しました` : `"${path}" はすでにリモートで削除されていました`);
+        this.render();
+        return true;
+      } catch (e) {
+        this.setSync('error');
+        if (!this.handleAuthError(e)) this.message(`削除に失敗しました: ${(e as Error).message}`, 'error');
+        return false;
+      }
+    };
+    // Queue behind pending saves so a :w of the same memo cannot land after the delete.
+    const p = this.saveQueue.then(run);
+    this.saveQueue = p.catch(() => undefined);
+    return p;
+  }
+
+  /** A one-key y/N question in the command line. Anything but y answers no. */
+  private confirm(question: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const input = el('input', 'prompt');
+      input.setAttribute('aria-label', question);
+      this.dom.cmdline.replaceChildren(el('span', '', question), input);
+      this.dom.cmdline.dataset.level = 'warn';
+      let done = false;
+      const finish = (yes: boolean) => {
+        if (done) return;
+        done = true;
+        this.dom.cmdline.replaceChildren();
+        resolve(yes);
+      };
+      const isYes = (ch: string) => /^[yYｙＹ]/.test(ch);
+      input.addEventListener('keydown', (e) => {
+        if (e.isComposing) return;
+        if (e.key === 'Escape' || e.key === 'Enter') {
+          e.preventDefault();
+          return finish(false);
+        }
+        // Modifiers, and soft keyboards that report "Unidentified": wait for the input event.
+        if (e.key.length !== 1) return;
+        e.preventDefault();
+        finish(isYes(e.key));
+      });
+      input.addEventListener('input', () => input.value && finish(isYes(input.value)));
+      // After the current key event: closing Vim's own `:` prompt refocuses the editor.
+      setTimeout(() => {
+        if (done) return;
+        input.focus();
+        input.addEventListener('blur', () => finish(false));
+      });
+    });
+  }
+
   // ----------------------------------------------------------------- ex
 
   /** Ex commands shared by the editor (via Vim.defineEx) and the dashboard prompt. */
@@ -429,6 +516,16 @@ export class App {
             .map((b, i) => `${i + 1}${b.path === this.current ? ' %a' : '   '} ${this.isModified(b) ? '+' : ' '} "${b.path}"`)
             .join('\n') || 'バッファはありません',
         );
+      case 'Delete': {
+        // :Delete [name] — the named memo, else the dashboard selection, else the current buffer.
+        const path = arg
+          ? normalizeMemoName(arg)
+          : this.dashboardOpen
+            ? this.dashboardItems()[this.dashboardIndex]?.file.path
+            : this.current;
+        if (!path) return this.message('E32: ファイル名がありません', 'error');
+        return void this.deleteMemo(path, bang);
+      }
       case 'Dashboard':
         return this.showDashboard();
       case 'Sync':
@@ -559,6 +656,20 @@ export class App {
       q: () => this.hideDashboard(),
       ':': () => this.prompt(),
     };
+    if (key === 'd') {
+      e.preventDefault();
+      // dd: delete the selected memo (asks first). A lone d waits for the second.
+      if (Date.now() - this.pendingD < LEADER_TIMEOUT_MS) {
+        this.pendingD = 0;
+        const hit = this.dashboardItems()[this.dashboardIndex];
+        if (hit) void this.deleteMemo(hit.file.path);
+      } else {
+        this.pendingD = Date.now();
+        this.message('d');
+      }
+      return;
+    }
+    this.pendingD = 0;
     const fn = keys[key];
     if (fn) {
       e.preventDefault();
@@ -717,7 +828,7 @@ export class App {
       'dash-footer',
       query
         ? '↑/↓ 選択 · Enter 開く · Esc 検索をやめる'
-        : 'j/k 移動 · Enter 開く · / 検索 · n 新規 · r 同期 · q 戻る',
+        : 'j/k 移動 · Enter 開く · / 検索 · n 新規 · dd 削除 · r 同期 · q 戻る',
     );
     this.dom.dashboard.replaceChildren(el('pre', 'logo', LOGO), el('div', 'dash-sub', 'memo'), actions, list, footer);
     list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
@@ -774,6 +885,7 @@ export function configureVim() {
   define('bdelete', 'bd');
   define('ls', 'ls');
   define('buffers', 'buffers', 'ls');
+  define('Delete', 'Delete');
   define('Dashboard', 'Dashboard');
   define('Sync', 'Sync');
   define('Logout', 'Logout');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appendToIndex, memoTitle, newMemoName, normalizeMemoName, toEditorText, toFileText } from './nb';
+import { appendToIndex, memoTitle, removeFromIndex, newMemoName, normalizeMemoName, toEditorText, toFileText } from './nb';
 import { MockTransport } from './mock';
 import { MemoRepo, type KeyValueStore } from './repo';
 import type { Head } from './transport';
@@ -31,6 +31,11 @@ describe('nb helpers', () => {
     expect(appendToIndex('a.md', 'b.md')).toBe('a.md\nb.md\n');
     expect(appendToIndex('', 'a.md')).toBe('a.md\n');
     expect(appendToIndex('a.md\n', 'a.md')).toBe('a.md\n');
+  });
+  it('removes a name from .index', () => {
+    expect(removeFromIndex('a.md\nb.md\nc.md\n', 'b.md')).toBe('a.md\nc.md\n');
+    expect(removeFromIndex('a.md\n', 'a.md')).toBe('');
+    expect(removeFromIndex('a.md\n', 'x.md')).toBe('a.md\n');
   });
   it('titles from heading or first line', () => {
     expect(memoTitle('\n# Title\nbody')).toBe('Title');
@@ -165,6 +170,37 @@ describe('MemoRepo', () => {
     await t.externalWrite('example.md', null, '[nb] Delete: example.md');
     expect(await repo.save('example.md', 'still here\n')).toBe('added');
     expect(await t.readFile('example.md')).toBe('still here\n');
+  });
+
+  it('deletes a memo and its .index line in one commit', async () => {
+    const { t, repo, calls } = await loaded();
+    const changed: string[][] = [];
+    repo.onChange((c) => changed.push(c));
+    expect(await repo.remove('example.md')).toBe(true);
+    expect(calls).toEqual(['createCommit', 'updateRef']);
+    expect(t.log).toEqual(['[nb] Delete: example.md']);
+    expect(await t.readFile('example.md')).toBeUndefined();
+    expect(await t.readFile('.index')).toBe('20261025235729.md\n');
+    expect(repo.get('example.md')).toBeUndefined();
+    expect(repo.get('.index')?.text).toBe('20261025235729.md\n');
+    expect(changed.flat()).toContain('example.md');
+  });
+
+  it('deletes on top of a remote that moved', async () => {
+    const { t, repo } = await loaded();
+    await t.externalWrite('other.md', 'o\n', '[nb] Add: other.md');
+    expect(await repo.remove('example.md')).toBe(true);
+    expect(t.log).toEqual(['[nb] Add: other.md', '[nb] Delete: example.md']);
+    expect(await t.readFile('other.md')).toBe('o\n');
+    expect(repo.get('other.md')?.text).toBe('o\n');
+  });
+
+  it('reports a memo already deleted remotely', async () => {
+    const { t, repo } = await loaded();
+    await t.externalWrite('example.md', null, '[nb] Delete: example.md');
+    expect(await repo.remove('example.md')).toBe(false);
+    expect(t.log).toEqual(['[nb] Delete: example.md']);
+    expect(repo.get('example.md')).toBeUndefined();
   });
 
   it('restores the snapshot from storage', async () => {

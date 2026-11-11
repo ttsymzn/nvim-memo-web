@@ -1,4 +1,4 @@
-import { INDEX_FILE, appendToIndex } from './nb';
+import { INDEX_FILE, appendToIndex, removeFromIndex } from './nb';
 import type { FileChange, Head, Transport, TreeEntry } from './transport';
 
 export interface KeyValueStore {
@@ -166,16 +166,53 @@ export class MemoRepo {
       changes.push({ path: INDEX_FILE, content: appendToIndex(indexText, path) });
     }
     const message = `[nb] ${existing ? 'Edit' : 'Add'}: ${path}`;
+    if (!(await this.push(head, changes, message))) return null;
+    return existing ? 'edited' : 'added';
+  }
 
+  /**
+   * Delete `path` (and its `.index` line) on top of the current remote `main`,
+   * as `nb delete` does. Resolves false when the memo is already gone remotely.
+   */
+  async remove(path: string): Promise<boolean> {
+    // Try the local snapshot first; if it is stale, start over from the remote.
+    if (this.head && this.entries.some((e) => e.path === path)) {
+      if (await this.removeOn(this.head, this.entries, path)) return true;
+    }
+    for (let attempt = 0; attempt < MAX_PUSH_ATTEMPTS; attempt++) {
+      const head = await this.transport.getHead();
+      const entries = await this.transport.listTree(head.tree);
+      if (!entries.some((e) => e.path === path)) {
+        await this.adopt(head, entries);
+        return false;
+      }
+      if (await this.removeOn(head, entries, path)) return true;
+    }
+    throw new Error(`push failed ${MAX_PUSH_ATTEMPTS} times: the branch keeps moving`);
+  }
+
+  /** Returns false when the branch is no longer at `head`. */
+  private async removeOn(head: Head, entries: TreeEntry[], path: string): Promise<boolean> {
+    const changes: FileChange[] = [{ path, content: null }];
+    const index = entries.find((e) => e.path === INDEX_FILE);
+    if (index) {
+      const indexText = (await this.blobText(index.sha)) ?? '';
+      const next = removeFromIndex(indexText, path);
+      if (next !== indexText) changes.push({ path: INDEX_FILE, content: next });
+    }
+    return this.push(head, changes, `[nb] Delete: ${path}`);
+  }
+
+  /** Commit `changes` on `head` and fast-forward the branch. False when the branch moved meanwhile. */
+  private async push(head: Head, changes: FileChange[], message: string): Promise<boolean> {
     const next = await this.transport.createCommit(head, changes, message);
-    if (!(await this.transport.updateRef(next.head.commit))) return null;
-
+    if (!(await this.transport.updateRef(next.head.commit))) return false;
     for (const c of changes) {
       const sha = next.entries.find((e) => e.path === c.path)?.sha;
-      if (sha) this.blobs.set(sha, c.content);
+      if (sha && c.content !== null) this.blobs.set(sha, c.content);
     }
     await this.adopt(next.head, next.entries);
-    return existing ? 'edited' : 'added';
+    return true;
   }
 
   /** Record a Contents API write. If others pushed first, list the new tree to pick up their changes too. */
