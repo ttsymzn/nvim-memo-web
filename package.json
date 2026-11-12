@@ -17,7 +17,9 @@
     "@codemirror/view": "^6.34.1",
     "@lezer/highlight": "^1.2.1",
     "@replit/codemirror-vim": "^6.2.1",
-    "idb-keyval": "^6.2.1"
+    "dompurify": "^3.4.17",
+    "idb-keyval": "^6.2.1",
+    "marked": "^18.2.0"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.0.0",

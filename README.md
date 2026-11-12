@@ -52,6 +52,8 @@ Vim キーバインドの詳しい説明は [docs/vim-bindings.md](docs/vim-bind
 | `:bn` `:bp` `:bd` `:ls` / `H` `L` `<Space>bd` | バッファ操作 |
 | `y` `d` `c` `x` / `p` `P` | OS のクリップボードと連携（Neovim の `clipboard=unnamedplus` 相当）。`"a` などのレジスタ指定時は従来どおり |
 | `<Space><Space>` / `<Space>ff` / `:Dashboard` | メモ一覧（M2 で fuzzy picker に置き換え予定） |
+| `<Space>cp` / `:MarkdownPreviewToggle` | 画面を分割して Markdown プレビューを表示 / 非表示（`:MarkdownPreview` / `:MarkdownPreviewStop` も可） |
+| `<C-w>w` / `<Space>ww`、`<C-w>c` / `<Space>wd` | エディタ ↔ プレビューの移動、プレビューを閉じる（詳しくは [docs](docs/vim-bindings.md#9-markdown-プレビュー本アプリ独自)） |
 | `:Delete [name]`（`:Delete!` で確認なし） | メモを削除（`[nb] Delete:` で 1 コミット。`.index` からも消す）。名前を省くと、エディタでは今のメモ、ダッシュボードでは選択中のメモ |
 | `:Sync` | リモートを取り込み |
 | `:Logout` | token を削除 |
@@ -76,3 +78,4 @@ Vim キーバインドの詳しい説明は [docs/vim-bindings.md](docs/vim-bind
 | `src/nb.ts` | nb の流儀（ファイル名、`.index`） |
 | `src/app.ts` | バッファ、Ex コマンド、ダッシュボード、ステータスライン |
 | `src/editor.ts` `src/theme.ts` | CodeMirror + vim、tokyonight |
+| `src/preview.ts` | Markdown プレビューの描画（marked、表示前に DOMPurify で無害化） |
