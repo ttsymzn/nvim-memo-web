@@ -52,10 +52,11 @@ Vim キーバインドの詳しい説明は [docs/vim-bindings.md](docs/vim-bind
 | `:bn` `:bp` `:bd` `:ls` / `H` `L` `<Space>bd` | バッファ操作 |
 | `y` `d` `c` `x` / `p` `P` | OS のクリップボードと連携（Neovim の `clipboard=unnamedplus` 相当）。`"a` などのレジスタ指定時は従来どおり |
 | `<Space><Space>` / `<Space>ff` / `:Dashboard` | メモ一覧（M2 で fuzzy picker に置き換え予定） |
+| `:Delete [name]`（`:Delete!` で確認なし） | メモを削除（`[nb] Delete:` で 1 コミット。`.index` からも消す）。名前を省くと、エディタでは今のメモ、ダッシュボードでは選択中のメモ |
 | `:Sync` | リモートを取り込み |
 | `:Logout` | token を削除 |
 
-ダッシュボード: `j`/`k` 移動、`Enter` 開く、`/` 全メモを検索、`n` 新規、`r` 同期、`:` コマンド、`q` 戻る。
+ダッシュボード: `j`/`k` 移動、`Enter` 開く、`/` 全メモを検索、`n` 新規、`dd` 削除（`y` で確定）、`r` 同期、`:` コマンド、`q` 戻る。
 
 `/` の検索はファイル名（拡張子を除く）と本文が対象で、大文字小文字を区別しない。スペース区切りで AND 検索。
 入力中は `↑`/`↓`（`Ctrl+P`/`Ctrl+N`）で選択、`Enter` で一致箇所にカーソルを置いて開く、`Esc` で解除。

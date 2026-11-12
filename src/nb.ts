@@ -19,6 +19,14 @@ export function appendToIndex(index: string, name: string): string {
   return lines.join('\n') + '\n';
 }
 
+/** Drop a file name from `.index`. Returns the input unchanged when it is not listed. */
+export function removeFromIndex(index: string, name: string): string {
+  const lines = index.split('\n').filter((l) => l !== '');
+  if (!lines.includes(name)) return index;
+  const rest = lines.filter((l) => l !== name);
+  return rest.length ? rest.join('\n') + '\n' : '';
+}
+
 /** True for files that are notes (hidden nb files such as `.index` are not). */
 export function isMemoPath(path: string): boolean {
   return !path.startsWith('.') && !path.includes('/');
