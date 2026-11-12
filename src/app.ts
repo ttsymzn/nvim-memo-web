@@ -1,11 +1,13 @@
 import { EditorState, Prec, type Extension } from '@codemirror/state';
 import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { Vim, getCM } from '@replit/codemirror-vim';
+import DOMPurify from 'dompurify';
 import { clearKeyLog, keyLog, trapBackKey } from './backkey';
 import { syncYanksToClipboard } from './clipboard';
 import { isAuthError } from './github';
 import { createState, editorExtensions } from './editor';
 import { isMemoPath, memoTitle, newMemoName, normalizeMemoName, toEditorText, toFileText } from './nb';
+import { markdownBlocks } from './preview';
 import type { MemoRepo } from './repo';
 import { searchMemos, type SearchHit } from './search';
 
@@ -21,6 +23,8 @@ interface Buffer {
 
 type SyncStatus = 'idle' | 'syncing' | 'saving' | 'error' | 'offline';
 type Level = 'info' | 'error' | 'warn';
+/** The two "windows": the editor and the markdown preview beside it. */
+type Pane = 'editor' | 'preview';
 
 const LEADER_TIMEOUT_MS = 1000;
 
@@ -32,7 +36,16 @@ const LEADER_MAPS: Record<string, [string, string?]> = {
   // Until the fuzzy picker lands (M2), the file finders open the dashboard list.
   ' ': ['Dashboard'],
   ff: ['Dashboard'],
+  // LazyVim's markdown extra: <leader>cp toggles the preview.
+  cp: ['MarkdownPreviewToggle'],
+  ww: ['wincmd', 'w'],
+  wd: ['wincmd', 'c'],
 };
+
+/** Re-render the preview this long after the last edit. */
+const PREVIEW_DEBOUNCE_MS = 120;
+/** Preview scroll for j/k, in pixels. */
+const PREVIEW_LINE_PX = 42;
 
 const REFRESH_ON_FOCUS_MS = 30_000;
 const REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -86,11 +99,24 @@ export class App {
   private leaderTimer?: ReturnType<typeof setTimeout>;
   /** Time of a first `d` on the dashboard, waiting for the second (`dd` deletes). */
   private pendingD = 0;
+  /** Time of a first `g` in the preview, waiting for the second (`gg` = top). */
+  private pendingG = 0;
+  /** <C-w> was pressed and the window command key is pending. */
+  private windowPending = false;
+  private windowTimer?: ReturnType<typeof setTimeout>;
+  /** :MarkdownPreview is on (shown whenever a memo is, not over the dashboard). */
+  private previewOpen = false;
+  /** The window that last had focus. */
+  private pane: Pane = 'editor';
+  private previewTimer?: ReturnType<typeof setTimeout>;
+  /** What the preview currently shows, to skip re-rendering the same text. */
+  private previewShown = { path: '', text: '' };
 
   private dom = {
     bufferline: document.getElementById('bufferline')!,
     dashboard: document.getElementById('dashboard')!,
     editor: document.getElementById('editor')!,
+    preview: document.getElementById('preview')!,
     statusline: document.getElementById('statusline')!,
     cmdline: document.getElementById('cmdline')!,
   };
@@ -116,6 +142,8 @@ export class App {
               void this.write();
               return true;
             }
+            const vim = getCM(view)?.state.vim;
+            if (this.onWindowKey(e, !!vim && !vim.insertMode)) return true;
             return this.onLeaderKey(e, view);
           },
         }),
@@ -127,6 +155,10 @@ export class App {
 
     repo.onChange((changed) => this.onRemoteChange(changed));
     document.addEventListener('keydown', (e) => this.onDashboardKey(e));
+    this.dom.preview.addEventListener('keydown', (e) => this.onPreviewKey(e));
+    this.dom.preview.addEventListener('click', (e) => this.onPreviewClick(e));
+    this.dom.editor.addEventListener('focusin', () => this.setPane('editor'));
+    this.dom.preview.addEventListener('focusin', () => this.setPane('preview'));
     trapBackKey();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && Date.now() - this.lastRefresh > REFRESH_ON_FOCUS_MS) {
@@ -471,6 +503,8 @@ export class App {
       case 'wa':
         return void this.writeAll();
       case 'q':
+        // :q in the preview window closes that window, as in Neovim.
+        if (this.previewVisible() && this.pane === 'preview') return this.closePreview();
         if (!this.current) return;
         return void this.close(this.current, bang);
       case 'qa': {
@@ -526,6 +560,18 @@ export class App {
         if (!path) return this.message('E32: ファイル名がありません', 'error');
         return void this.deleteMemo(path, bang);
       }
+      case 'MarkdownPreview':
+        return this.openPreview();
+      case 'MarkdownPreviewStop':
+        return this.closePreview();
+      case 'MarkdownPreviewToggle':
+        return this.previewOpen ? this.closePreview() : this.openPreview();
+      case 'wincmd':
+        if (!arg) return this.message('E471: 引数が必要です（例: :wincmd w）', 'error');
+        return this.windowCommand(arg[0]);
+      case 'close':
+      case 'only':
+        return this.closePreview();
       case 'Dashboard':
         return this.showDashboard();
       case 'Sync':
@@ -560,11 +606,15 @@ export class App {
   private onLeaderKey(e: KeyboardEvent, view: EditorView): boolean {
     const vim = getCM(view)?.state.vim;
     if (!vim || vim.insertMode || e.isComposing) return false;
+    // Space after f/t/r or an operator is a literal key for Vim.
+    return this.leaderKey(e, !vim.inputState.keyBuffer.length && !vim.inputState.operator);
+  }
 
+  /** The <leader> state machine, shared by the editor and the preview. */
+  private leaderKey(e: KeyboardEvent, canStart: boolean): boolean {
     if (this.leader === null) {
       const plain = e.key === ' ' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
-      // Space after f/t/r or an operator is a literal key for Vim.
-      if (!plain || vim.inputState.keyBuffer.length || vim.inputState.operator) return false;
+      if (!plain || !canStart) return false;
       this.leader = '';
       this.message('<leader>');
     } else if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {
@@ -603,6 +653,216 @@ export class App {
       if (u.docChanged) this.renderBufferline();
       this.renderStatusline();
     }
+    if (!this.previewVisible()) return;
+    if (u.docChanged) {
+      clearTimeout(this.previewTimer);
+      this.previewTimer = setTimeout(() => this.renderPreview(), PREVIEW_DEBOUNCE_MS);
+    } else if (u.selectionSet) {
+      this.syncPreviewScroll();
+    }
+  }
+
+  // ------------------------------------------------------------- windows
+
+  /**
+   * <C-w>{key}: Neovim's window commands, in the editor (Normal mode) and the
+   * preview. Desktop browsers may keep Ctrl+W for "close tab"; then use
+   * <leader>ww / <leader>wd or :wincmd.
+   */
+  private onWindowKey(e: KeyboardEvent, canStart: boolean): boolean {
+    if (e.isComposing) return false;
+    if (this.windowPending) {
+      if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return true;
+      e.preventDefault();
+      this.windowPending = false;
+      clearTimeout(this.windowTimer);
+      this.message('');
+      if (e.key !== 'Escape') this.windowCommand(e.key);
+      return true;
+    }
+    if (!canStart || !e.ctrlKey || e.altKey || e.metaKey || e.key.toLowerCase() !== 'w') return false;
+    e.preventDefault();
+    this.windowPending = true;
+    this.message('<C-w>');
+    this.windowTimer = setTimeout(() => {
+      this.windowPending = false;
+      if (this.dom.cmdline.textContent === '<C-w>') this.message('');
+    }, LEADER_TIMEOUT_MS);
+    return true;
+  }
+
+  private windowCommand(key: string) {
+    switch (key) {
+      case 'w':
+      case 'W':
+      case 'p':
+        return this.focusPane(this.pane === 'editor' ? 'preview' : 'editor');
+      case 'h':
+      case 'k':
+        return this.focusPane('editor');
+      case 'l':
+      case 'j':
+        return this.focusPane('preview');
+      case 'q':
+      case 'c':
+      case 'o':
+        // The preview is the only window that can close; the editor always stays.
+        return this.closePreview();
+      case 'v':
+      case 's':
+        return this.message('E: 画面分割（:vsplit / :split）は未対応です。プレビューは <leader>cp か :MarkdownPreview', 'warn');
+    }
+    this.message(`<C-w>${key} は未対応です`, 'warn');
+  }
+
+  private setPane(pane: Pane) {
+    if (this.pane === pane) return;
+    this.pane = pane;
+    this.renderStatusline();
+  }
+
+  private focusPane(pane: Pane) {
+    if (pane === 'preview') {
+      if (this.previewVisible()) this.dom.preview.focus({ preventScroll: true });
+    } else if (this.current && !this.dashboardOpen) {
+      this.view.focus();
+    }
+  }
+
+  private previewVisible() {
+    return this.previewOpen && !this.dashboardOpen && !!this.current;
+  }
+
+  /** :MarkdownPreview — show the rendered memo beside the editor. Focus stays in the editor. */
+  private openPreview() {
+    this.previewOpen = true;
+    this.render();
+    this.syncPreviewScroll();
+    if (!this.current) this.message('メモを開くとプレビューが表示されます');
+  }
+
+  private closePreview() {
+    if (!this.previewOpen) return;
+    const hadFocus = this.pane === 'preview';
+    this.previewOpen = false;
+    this.pane = 'editor';
+    this.render();
+    if (hadFocus) this.focusPane('editor');
+  }
+
+  private renderPreview() {
+    clearTimeout(this.previewTimer);
+    if (!this.previewVisible()) return;
+    const path = this.current!;
+    const text = this.view.state.doc.toString();
+    if (this.previewShown.path === path && this.previewShown.text === text) return;
+    const pathChanged = this.previewShown.path !== path;
+    this.previewShown = { path, text };
+
+    const body = el('article', 'md-body');
+    for (const block of markdownBlocks(text)) {
+      const div = el('div', 'md-block');
+      div.dataset.line = String(block.line);
+      div.innerHTML = DOMPurify.sanitize(block.html);
+      body.append(div);
+    }
+    if (!body.childElementCount) body.append(el('p', 'md-empty', '（空のメモ）'));
+    this.dom.preview.replaceChildren(body);
+    if (pathChanged) this.dom.preview.scrollTop = 0;
+    this.syncPreviewScroll();
+  }
+
+  /**
+   * Scroll the preview to the block under the editor's cursor (a third of the
+   * way down), interpolating inside long blocks. Not while the preview has
+   * focus: then it is being scrolled by hand.
+   */
+  private syncPreviewScroll() {
+    if (this.pane === 'preview') return;
+    const preview = this.dom.preview;
+    const state = this.view.state;
+    const line = state.doc.lineAt(state.selection.main.head).number;
+    const blocks = [...preview.querySelectorAll<HTMLElement>('.md-block')];
+    let i = -1;
+    while (i + 1 < blocks.length && Number(blocks[i + 1].dataset.line) <= line) i++;
+    if (i < 0) {
+      preview.scrollTop = 0;
+      return;
+    }
+    const block = blocks[i];
+    const start = Number(block.dataset.line);
+    const end = i + 1 < blocks.length ? Number(blocks[i + 1].dataset.line) : state.doc.lines + 1;
+    const fraction = Math.min(1, (line - start) / Math.max(1, end - start));
+    const top = block.offsetTop + fraction * block.offsetHeight;
+    preview.scrollTop = Math.max(0, top - preview.clientHeight / 3);
+  }
+
+  /** Keys in the preview window: scrolling, buffers, <leader>, <C-w>, `:`. */
+  private onPreviewKey(e: KeyboardEvent) {
+    if (e.isComposing || (e.target as HTMLElement).closest('input, textarea')) return;
+    if (this.onWindowKey(e, true) || this.leaderKey(e, true)) return;
+    const preview = this.dom.preview;
+    const page = preview.clientHeight;
+    const scroll = (dy: number) => preview.scrollBy({ top: dy });
+    const ctrl: Record<string, () => void> = {
+      d: () => scroll(page / 2),
+      u: () => scroll(-page / 2),
+      f: () => scroll(page * 0.9),
+      b: () => scroll(-page * 0.9),
+      e: () => scroll(PREVIEW_LINE_PX),
+      y: () => scroll(-PREVIEW_LINE_PX),
+    };
+    const plain: Record<string, () => void> = {
+      j: () => scroll(PREVIEW_LINE_PX),
+      ArrowDown: () => scroll(PREVIEW_LINE_PX),
+      k: () => scroll(-PREVIEW_LINE_PX),
+      ArrowUp: () => scroll(-PREVIEW_LINE_PX),
+      PageDown: () => scroll(page * 0.9),
+      PageUp: () => scroll(-page * 0.9),
+      G: () => (preview.scrollTop = preview.scrollHeight),
+      H: () => this.cycle(-1),
+      L: () => this.cycle(1),
+      q: () => this.closePreview(),
+      // Esc goes back to the editor (also Android's back key, see backkey.ts).
+      Escape: () => this.focusPane('editor'),
+      ':': () => this.prompt(),
+    };
+    if (e.altKey || e.metaKey) return;
+    let fn = e.ctrlKey ? ctrl[e.key] : plain[e.key];
+    if (!e.ctrlKey && e.key === 'g') {
+      // gg: top. A lone g waits for the second.
+      const second = Date.now() - this.pendingG < LEADER_TIMEOUT_MS;
+      this.pendingG = second ? 0 : Date.now();
+      fn = () => second && (preview.scrollTop = 0);
+    } else {
+      this.pendingG = 0;
+    }
+    if (fn) {
+      e.preventDefault();
+      fn();
+    }
+  }
+
+  /** Links: web pages open in a new tab, relative links to memos open the memo. */
+  private onPreviewClick(e: MouseEvent) {
+    const a = (e.target as HTMLElement).closest('a');
+    if (!a) return;
+    e.preventDefault();
+    const href = a.getAttribute('href') ?? '';
+    if (/^(https?:|mailto:)/i.test(href)) {
+      window.open(a.href, '_blank', 'noopener');
+      return;
+    }
+    if (!href || href.startsWith('#') || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+    let name = href.split('#')[0].replace(/^\.\//, '');
+    try {
+      name = decodeURIComponent(name);
+    } catch {
+      // Keep the raw href.
+    }
+    const path = normalizeMemoName(name);
+    if (this.buffers.has(path) || this.repo.get(path)) this.open(path);
+    else this.message(`E: "${path}" というメモはありません`, 'error');
   }
 
   /**
@@ -716,21 +976,32 @@ export class App {
     input.addEventListener('blur', () => input.isConnected && this.dom.cmdline.replaceChildren());
   }
 
-  /** A minimal `:` prompt for the dashboard, where no editor has focus. */
+  /** A minimal `:` prompt for the dashboard and the preview, where no editor has focus. */
   private prompt() {
     const input = el('input', 'prompt');
     input.setAttribute('aria-label', 'Ex コマンド');
     this.dom.cmdline.replaceChildren(el('span', '', ':'), input);
     this.dom.cmdline.dataset.level = 'info';
+    const fromPreview = this.previewVisible() && this.pane === 'preview';
+    // Back to the preview, unless the command moved focus somewhere (e.g. :e opens the editor).
+    const refocus = () => {
+      const active = document.activeElement;
+      if (fromPreview && this.previewVisible() && (!active || active === document.body)) this.focusPane('preview');
+    };
     input.focus();
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.dom.cmdline.replaceChildren();
-      if (e.key !== 'Enter') return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.dom.cmdline.replaceChildren();
+        return refocus();
+      }
+      if (e.key !== 'Enter' || e.isComposing) return;
       e.preventDefault();
       const line = input.value.trim();
       this.dom.cmdline.replaceChildren();
       const m = /^(\w+)(!?)\s*(.*)$/.exec(line);
       if (m) this.ex(EX_ALIASES[m[1]] ?? m[1], m[2] === '!', m[3]);
+      refocus();
     });
     input.addEventListener('blur', () => input.isConnected && this.dom.cmdline.replaceChildren());
   }
@@ -740,9 +1011,11 @@ export class App {
   private render() {
     this.dom.dashboard.hidden = !this.dashboardOpen;
     this.dom.editor.hidden = this.dashboardOpen;
+    this.dom.preview.hidden = !this.previewVisible();
     this.renderBufferline();
     this.renderStatusline();
     if (this.dashboardOpen) this.renderDashboard();
+    this.renderPreview();
   }
 
   private renderBufferline() {
@@ -756,7 +1029,7 @@ export class App {
   }
 
   private renderStatusline() {
-    const mode = this.dashboardOpen ? 'dashboard' : this.mode;
+    const mode = this.dashboardOpen ? 'dashboard' : this.previewVisible() && this.pane === 'preview' ? 'preview' : this.mode;
     const modeLabel = mode.replace('visual-linewise', 'v-line').replace('visual-blockwise', 'v-block').toUpperCase();
     const modeKey = mode.split('-')[0];
     const buf = this.current && !this.dashboardOpen ? this.buffers.get(this.current) : undefined;
@@ -841,6 +1114,7 @@ export class App {
 const EX_ALIASES: Record<string, string> = {
   write: 'w', wall: 'wa', quit: 'q', qall: 'qa', xit: 'x', edit: 'e',
   bnext: 'bn', bprevious: 'bp', bdelete: 'bd', buffers: 'ls',
+  on: 'only', clo: 'close', winc: 'wincmd',
 };
 
 /**
@@ -890,6 +1164,12 @@ export function configureVim() {
   define('Sync', 'Sync');
   define('Logout', 'Logout');
   define('KeyLog', 'KeyLog');
+  define('MarkdownPreview', 'MarkdownPreview');
+  define('MarkdownPreviewStop', 'MarkdownPreviewStop');
+  define('MarkdownPreviewToggle', 'MarkdownPreviewToggle');
+  define('wincmd', 'winc');
+  define('close', 'clo');
+  define('only', 'on');
 
   // LazyVim-style keymaps (leader = Space).
   Vim.setOption('langmap', imeLangmap());

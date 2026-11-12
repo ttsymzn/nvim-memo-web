@@ -109,11 +109,20 @@ button {
 #main {
   min-height: 0;
   position: relative;
+  display: flex;
 }
 
-#editor,
-#dashboard {
-  height: 100%;
+/* エディタとプレビューを左右に並べる（縦長の画面では上下） */
+#main > section {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (orientation: portrait) {
+  #main {
+    flex-direction: column;
+  }
 }
 
 #editor .cm-editor {
@@ -199,6 +208,9 @@ button {
 .m-dashboard {
   background: var(--yellow);
 }
+.m-preview {
+  background: var(--cyan);
+}
 
 .sl-branch {
   color: var(--magenta);
@@ -251,6 +263,173 @@ button {
   background: none;
   border: none;
   outline: none;
+}
+
+/* --------------------------------------------------------------- preview */
+
+#preview {
+  position: relative;
+  overflow-y: auto;
+  border-left: 1px solid var(--bg-hl);
+  background: var(--bg);
+  font-family: system-ui, -apple-system, 'Hiragino Sans', 'BIZ UDGothic', sans-serif;
+  font-size: 15px;
+  line-height: 1.75;
+  overscroll-behavior: contain;
+}
+
+@media (orientation: portrait) {
+  #preview {
+    border-left: none;
+    border-top: 1px solid var(--bg-hl);
+  }
+}
+
+#preview:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
+.md-body {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 20px 40vh;
+  overflow-wrap: anywhere;
+}
+
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  margin: 1.2em 0 0.5em;
+  line-height: 1.4;
+}
+.md-body h1 {
+  color: var(--blue);
+  font-size: 1.6em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid var(--bg-hl);
+}
+.md-body h2 {
+  color: var(--yellow);
+  font-size: 1.35em;
+  padding-bottom: 0.15em;
+  border-bottom: 1px solid var(--bg-hl);
+}
+.md-body h3 {
+  color: var(--green);
+  font-size: 1.15em;
+}
+.md-body h4,
+.md-body h5,
+.md-body h6 {
+  color: var(--cyan);
+  font-size: 1em;
+}
+.md-body .md-block:first-child > :first-child {
+  margin-top: 0;
+}
+
+.md-body p,
+.md-body ul,
+.md-body ol,
+.md-body blockquote,
+.md-body pre,
+.md-body table {
+  margin: 0 0 0.9em;
+}
+
+.md-body ul,
+.md-body ol {
+  padding-left: 1.6em;
+}
+.md-body li::marker {
+  color: var(--orange);
+}
+.md-body li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -1.3em;
+}
+.md-body input[type='checkbox'] {
+  accent-color: var(--green);
+  margin: 0 0.4em 0 0;
+  vertical-align: -0.1em;
+}
+
+.md-body a {
+  color: var(--cyan);
+}
+.md-body strong {
+  color: var(--orange);
+}
+.md-body em {
+  color: var(--magenta);
+}
+.md-body del {
+  color: var(--comment);
+}
+
+.md-body code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  color: var(--green);
+  background: var(--bg-dark);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.md-body pre {
+  background: var(--bg-dark);
+  padding: 10px 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+.md-body pre code {
+  padding: 0;
+  color: var(--fg);
+  background: none;
+}
+
+.md-body blockquote {
+  padding: 0 0 0 1em;
+  margin-left: 0;
+  border-left: 3px solid var(--gutter);
+  color: var(--fg-dark);
+}
+
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--gutter);
+  margin: 1.5em 0;
+}
+
+.md-body table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid var(--bg-hl);
+  padding: 4px 10px;
+}
+.md-body th {
+  background: var(--bg-dark);
+  color: var(--blue);
+}
+
+.md-body img {
+  max-width: 100%;
+}
+
+.md-tag {
+  color: var(--teal);
+}
+
+.md-empty {
+  color: var(--comment);
 }
 
 /* ------------------------------------------------------------- dashboard */
