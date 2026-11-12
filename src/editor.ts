@@ -12,6 +12,7 @@ import {
   highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
+  scrollPastEnd,
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
@@ -160,6 +161,9 @@ export function editorExtensions(onUpdate: (u: ViewUpdate) => void): Extension[]
     markdown(),
     tagHighlight,
     EditorView.lineWrapping,
+    // Like Neovim's `~` lines below the last line: lets zz/zt (and <C-e>)
+    // scroll the last lines of a memo up, even when the memo is short.
+    scrollPastEnd(),
     tokyonight,
     EditorView.updateListener.of(onUpdate),
   ];
