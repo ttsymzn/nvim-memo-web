@@ -91,6 +91,15 @@ export function trapBackKey() {
     },
     true,
   );
+  window.addEventListener(
+    'keyup',
+    (e) => {
+      // IME switch keys (半角/全角, かな/英数) are sometimes only reported on keyup.
+      if (!e.isTrusted || !/^(Backquote|Lang\d)$/.test(e.code) || e.key.length === 1) return;
+      log(`keyup key=${e.key} code=${e.code} keyCode=${e.keyCode}`);
+    },
+    true,
+  );
   window.addEventListener('keydown', (e) => {
     if (!e.isTrusted) return;
     if (isEscapeKey(e)) {

@@ -18,6 +18,7 @@ import {
 } from '@codemirror/view';
 import { Vim, getCM, vim } from '@replit/codemirror-vim';
 import { pasteFromClipboard } from './clipboard';
+import { ImeTracker } from './ime';
 import { tokyonight } from './theme';
 
 class LineNumber extends GutterMarker {
@@ -101,6 +102,53 @@ function imeEscape(): Extension {
 }
 
 /**
+ * Follow the IME's on/off switch (半角/全角, かな/英数): turning it on in
+ * Normal mode enters Insert mode, turning it off in Insert mode returns to
+ * Normal mode. Other combinations keep the mode.
+ */
+function imeSwitchMode(): Extension {
+  const tracker = new ImeTracker();
+  let normalAfterComposition = false;
+  const toNormal = (view: EditorView) => {
+    const cm = getCM(view);
+    if (cm?.state.vim?.insertMode) Vim.handleKey(cm, '<Esc>', 'user');
+  };
+  const onKey = (e: KeyboardEvent, view: EditorView) => {
+    const on = tracker.key(e);
+    if (on === null) return false;
+    const cm = getCM(view);
+    const vim = cm?.state.vim;
+    if (!cm || !vim) return false;
+    if (on) {
+      normalAfterComposition = false;
+      // Plain Normal mode only: not Visual, nor halfway through `d`, `f`, `"a` ...
+      const idle = !vim.inputState.keyBuffer.length && !vim.inputState.operator && !vim.inputState.registerName;
+      if (!vim.insertMode && !vim.visualMode && idle) Vim.handleKey(cm, 'i', 'user');
+    } else if (vim.insertMode) {
+      // Turning the IME off commits what was being composed; leave once it has.
+      if (e.isComposing || view.composing) normalAfterComposition = true;
+      else toNormal(view);
+    }
+    return false;
+  };
+  return EditorView.domEventHandlers({
+    keydown: onKey,
+    keyup: onKey,
+    compositionstart() {
+      tracker.composition();
+      return false;
+    },
+    compositionend(_e, view) {
+      if (!normalAfterComposition) return false;
+      normalAfterComposition = false;
+      // Let CodeMirror apply the committed text first.
+      setTimeout(() => toNormal(view), 0);
+      return false;
+    },
+  });
+}
+
+/**
  * Normal/visual-mode keys typed with a Japanese IME on. codemirror-vim only
  * turns single-character IME text into keys; when the IME keeps composing,
  * the second key arrives as "ｇｇ" (or "gg") and was inserted into the memo.
@@ -148,6 +196,7 @@ export function editorExtensions(onUpdate: (u: ViewUpdate) => void): Extension[]
   return [
     vim({ status: false }),
     imeEscape(),
+    imeSwitchMode(),
     imeNormalMode(),
     pasteFromClipboard(),
     relativeLineNumbers,
