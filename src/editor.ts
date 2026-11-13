@@ -138,6 +138,10 @@ function imeSwitchMode(): Extension {
       tracker.composition();
       return false;
     },
+    blur() {
+      tracker.forget();
+      return false;
+    },
     compositionend(_e, view) {
       if (!normalAfterComposition) return false;
       normalAfterComposition = false;

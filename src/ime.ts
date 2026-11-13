@@ -3,31 +3,35 @@
  *
  * Browsers have no API for the IME's on/off state, so it is inferred:
  *
- * - Windows' 半角/全角 key reports the mode it switches *from*: "Hankaku"
- *   (VK_OEM_AUTO, 243) while the IME is off, "Zenkaku" (VK_OEM_ENLW, 244)
- *   while it is on. The IME may swallow the keydown ("Process", 229, code
- *   "Backquote"); then keyup decides, or the last known state is flipped.
+ * - Ordinary character keys show the current state: the IME swallows them
+ *   ("Process", 229) only while it is on. This is the most reliable evidence.
+ * - Windows' 半角/全角 key alternates between "Hankaku" (VK_OEM_AUTO, 243)
+ *   and "Zenkaku" (VK_OEM_ENLW, 244) on each press. That alternation is the
+ *   keyboard's, not the IME's: once the IME is switched some other way
+ *   (another app, Ctrl+Space, the mouse) it is out of step. So the key only
+ *   flips the observed state; the name decides only while nothing has been
+ *   observed ("Hankaku": off → on, "Zenkaku": on → off). The IME may also
+ *   swallow the keydown ("Process", code "Backquote"); then keyup completes it.
  * - Mac's かな / 英数 keys say which way they go ("Lang1"/"KanaMode",
  *   "Lang2"/"Eisu"/"Alphanumeric").
  * - Linux's "ZenkakuHankaku" and "KanjiMode" (Alt+半角/全角) only toggle.
- * - Ordinary character keys tell the current state: the IME swallows them
- *   ("Process") only while it is on. That keeps the last known state right
- *   for the keys that only toggle.
  */
 
 type Key = Pick<KeyboardEvent, 'type' | 'key' | 'code' | 'keyCode' | 'ctrlKey' | 'altKey' | 'metaKey' | 'repeat'>;
 
 /** IME switch keys that turn it on. */
-const ON_KEYS = new Set(['Hankaku', 'Lang1', 'KanaMode', 'HiraganaKatakana', 'Hiragana', 'Katakana']);
+const ON_KEYS = new Set(['Lang1', 'KanaMode', 'HiraganaKatakana', 'Hiragana', 'Katakana']);
 /** IME switch keys that turn it off. */
-const OFF_KEYS = new Set(['Zenkaku', 'Lang2', 'Eisu', 'Alphanumeric']);
+const OFF_KEYS = new Set(['Lang2', 'Eisu', 'Alphanumeric']);
 /** IME switch keys that only toggle. */
 const TOGGLE_KEYS = new Set(['ZenkakuHankaku', 'KanjiMode']);
 
 const isProcess = (e: Key) => e.key === 'Process' || e.keyCode === 229;
 
 /** Which way an IME switch key goes, or null if `e` is not one. */
-function switchOf(e: Key): 'on' | 'off' | 'toggle' | null {
+function switchOf(e: Key, known: boolean): 'on' | 'off' | 'toggle' | null {
+  if (e.key === 'Hankaku') return known ? 'toggle' : 'on';
+  if (e.key === 'Zenkaku') return known ? 'toggle' : 'off';
   if (ON_KEYS.has(e.key) || e.code === 'Lang1') return 'on';
   if (OFF_KEYS.has(e.key) || e.code === 'Lang2') return 'off';
   if (TOGGLE_KEYS.has(e.key)) return 'toggle';
@@ -37,6 +41,8 @@ function switchOf(e: Key): 'on' | 'off' | 'toggle' | null {
 export class ImeTracker {
   /** Last known IME state. */
   on = false;
+  /** `on` was observed (or derived from an observation), not guessed. */
+  known = false;
   /** This press's keydown already switched (so its keyup does nothing). */
   private handled = false;
   /** 半角/全角 swallowed by the IME on keydown: keyup decides. */
@@ -48,7 +54,7 @@ export class ImeTracker {
    */
   key(e: Key): boolean | null {
     if (e.repeat) return null;
-    const dir = switchOf(e);
+    const dir = switchOf(e, this.known);
     if (e.type === 'keydown') {
       this.pending = false;
       this.handled = false;
@@ -62,7 +68,7 @@ export class ImeTracker {
         return null;
       }
       const state = stateFromCharKey(e);
-      if (state !== null) this.on = state;
+      if (state !== null) this.observe(state);
       return null;
     }
     // keyup: some browsers only report the switch key here.
@@ -82,12 +88,24 @@ export class ImeTracker {
 
   /** A composition started: the IME is on (and a pending Backquote was a character). */
   composition() {
-    this.on = true;
+    this.observe(true);
     this.pending = false;
   }
 
+  /** Focus left: the IME may be switched elsewhere, so forget what was observed. */
+  forget() {
+    this.known = false;
+    this.pending = false;
+  }
+
+  private observe(on: boolean) {
+    this.on = on;
+    this.known = true;
+  }
+
   private set(dir: 'on' | 'off' | 'toggle'): boolean {
-    this.on = dir === 'toggle' ? !this.on : dir === 'on';
+    if (dir === 'toggle') this.on = !this.on;
+    else this.observe(dir === 'on');
     return this.on;
   }
 }
