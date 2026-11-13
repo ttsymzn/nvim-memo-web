@@ -47,4 +47,22 @@ describe('ImeTracker', () => {
     press(t, ['a', 'KeyA']);
     expect(t.on).toBe(false);
   });
+
+  it('trusts typed keys over the 半角/全角 key name once they disagree', () => {
+    const t = new ImeTracker();
+    // Insert mode, typing Japanese: the IME is on.
+    press(t, ['Process', 'KeyA', 229], ['a', 'KeyA']);
+    // The key's alternation is out of step and says "turning on": it really turns off.
+    expect(press(t, ['Hankaku', 'Backquote', 243])).toEqual([false, null]);
+    // Normal mode, `j` arrives as itself: off. The key says "turning off": it really turns on.
+    press(t, ['j', 'KeyJ']);
+    expect(press(t, ['Zenkaku', 'Backquote', 244])).toEqual([true, null]);
+  });
+
+  it('falls back to the key name after focus left', () => {
+    const t = new ImeTracker();
+    press(t, ['Process', 'KeyA', 229], ['a', 'KeyA']);
+    t.forget();
+    expect(press(t, ['Hankaku', 'Backquote', 243])).toEqual([true, null]);
+  });
 });
